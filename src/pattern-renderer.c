@@ -454,7 +454,7 @@ static void cpat_item_update(struct cpat_item *it, obs_data_t *settings, int ind
 
 	const float golden_x = 0.6180339887f;
 	const float golden_y = 0.3819660113f;
-	float fi = (float)(index + 1);
+	float fi = (float)index;
 	it->sub_offset_x = fmodf(fi * golden_x, 1.0f);
 	it->sub_offset_y = fmodf(fi * golden_y, 1.0f);
 #undef IK
