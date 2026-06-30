@@ -33,7 +33,7 @@ struct cshape_transition {
 
 	int shape_kind;
 	int polygon_sides;
-	float ring_thickness;
+	float stroke_thickness;
 	struct vec4 shape_color;
 
 	bool use_source_texture;
@@ -179,7 +179,7 @@ static void cshape_update(void *data, obs_data_t *settings)
 
 	t->shape_kind = (int)obs_data_get_int(settings, "shape");
 	t->polygon_sides = (int)obs_data_get_int(settings, "polygon_sides");
-	t->ring_thickness = (float)obs_data_get_double(settings, "ring_thickness");
+	t->stroke_thickness = (float)obs_data_get_double(settings, "stroke_thickness");
 
 	uint32_t shape_col = (uint32_t)obs_data_get_int(settings, "shape_color");
 	vec4_from_rgba(&t->shape_color, shape_col);
@@ -346,9 +346,9 @@ static void cshape_video_callback(void *data, gs_texture_t *a, gs_texture_t *b, 
 	p = gs_effect_get_param_by_name(t->effect, "polygon_sides");
 	if (p)
 		gs_effect_set_int(p, t->polygon_sides);
-	p = gs_effect_get_param_by_name(t->effect, "ring_thickness");
+	p = gs_effect_get_param_by_name(t->effect, "stroke_thickness");
 	if (p)
-		gs_effect_set_float(p, t->ring_thickness);
+		gs_effect_set_float(p, t->stroke_thickness);
 	p = gs_effect_get_param_by_name(t->effect, "use_source_texture");
 	if (p)
 		gs_effect_set_int(p, t->use_source_texture ? 1 : 0);
@@ -473,11 +473,11 @@ static bool prop_shape_changed(obs_properties_t *props, obs_property_t *p, obs_d
 	UNUSED_PARAMETER(p);
 	int s = (int)obs_data_get_int(settings, "shape");
 	obs_property_t *poly = obs_properties_get(props, "polygon_sides");
-	obs_property_t *ring = obs_properties_get(props, "ring_thickness");
+	obs_property_t *stroke = obs_properties_get(props, "stroke_thickness");
 	if (poly)
 		obs_property_set_visible(poly, s == CSHAPE_POLYGON);
-	if (ring)
-		obs_property_set_visible(ring, s == CSHAPE_RING_LEGACY || s == CSHAPE_CROSS);
+	if (stroke)
+		obs_property_set_visible(stroke, s == CSHAPE_CROSS);
 	return true;
 }
 
@@ -614,7 +614,6 @@ static obs_properties_t *cshape_properties(void *data)
 	p = obs_properties_add_list(props, "shape", obs_module_text("Constellations.Shape"), OBS_COMBO_TYPE_LIST,
 				    OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.Circle"), CSHAPE_CIRCLE);
-	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.Ring"), CSHAPE_RING_LEGACY);
 	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.Cross"), CSHAPE_CROSS);
 	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.Square"), CSHAPE_SQUARE);
 	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.Polygon"), CSHAPE_POLYGON);
@@ -625,8 +624,8 @@ static obs_properties_t *cshape_properties(void *data)
 
 	obs_properties_add_int_slider(props, "polygon_sides", obs_module_text("Constellations.Shape.PolySides"), 3, 24,
 				      1);
-	obs_properties_add_float_slider(props, "ring_thickness", obs_module_text("Constellations.Shape.RingThickness"),
-					0.02, 1.0, 0.01);
+	obs_properties_add_float_slider(props, "stroke_thickness",
+					obs_module_text("Constellations.Shape.StrokeThickness"), 0.02, 1.0, 0.01);
 
 	obs_properties_add_color_alpha(props, "shape_color", obs_module_text("Constellations.Shape.Color"));
 
@@ -690,7 +689,7 @@ static void cshape_defaults(obs_data_t *settings)
 
 	obs_data_set_default_int(settings, "shape", CSHAPE_CIRCLE);
 	obs_data_set_default_int(settings, "polygon_sides", 6);
-	obs_data_set_default_double(settings, "ring_thickness", 0.2);
+	obs_data_set_default_double(settings, "stroke_thickness", 0.2);
 	obs_data_set_default_int(settings, "shape_color", 0xFFFFFFFF);
 	obs_data_set_default_double(settings, "cell_size", 64.0);
 

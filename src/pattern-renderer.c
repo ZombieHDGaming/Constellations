@@ -129,9 +129,7 @@ void cpat_renderer_set_defaults(obs_data_t *settings, bool include_canvas)
 	}
 	obs_data_set_default_double(settings, "anchor_x_pct", 50.0);
 	obs_data_set_default_double(settings, "anchor_y_pct", 50.0);
-	// Default matches the previous fixed cap so scenes saved before this
-	// became dynamic keep all of their pre-existing items visible/active.
-	obs_data_set_default_int(settings, "item_count", 4);
+	obs_data_set_default_int(settings, "item_count", 1);
 
 	for (int i = 0; i < CONSTELLATIONS_MAX_ITEMS; ++i) {
 		char key[64];
@@ -140,7 +138,7 @@ void cpat_renderer_set_defaults(obs_data_t *settings, bool include_canvas)
 		obs_data_set_default_int(settings, DK("kind"), CITEM_SHAPE);
 		obs_data_set_default_int(settings, DK("shape"), CSHAPE_CIRCLE);
 		obs_data_set_default_int(settings, DK("polygon_sides"), 6);
-		obs_data_set_default_double(settings, DK("ring_thickness"), 0.2);
+		obs_data_set_default_double(settings, DK("stroke_thickness"), 0.2);
 		obs_data_set_default_bool(settings, DK("outline_only"), false);
 		obs_data_set_default_int(settings, DK("color"), 0xFFFFFFFF);
 		obs_data_set_default_string(settings, DK("image_path"), "");
@@ -246,7 +244,7 @@ static void apply_item_kind_visibility(obs_properties_t *props, obs_data_t *sett
 	VIS("shape", kind == CITEM_SHAPE);
 	VIS("outline_only", kind == CITEM_SHAPE);
 	VIS("polygon_sides", kind == CITEM_SHAPE && shape_v == CSHAPE_POLYGON);
-	VIS("ring_thickness", kind == CITEM_SHAPE && (shape_v == CSHAPE_CROSS || outline));
+	VIS("stroke_thickness", kind == CITEM_SHAPE && (shape_v == CSHAPE_CROSS || outline));
 	VIS("color", kind == CITEM_SHAPE);
 	VIS("image_path", kind == CITEM_IMAGE);
 	VIS("source_name", kind == CITEM_SOURCE);
@@ -258,7 +256,7 @@ static void apply_item_enabled_visibility(obs_properties_t *props, obs_data_t *s
 	char key[64];
 	snprintf(key, sizeof(key), "item_%d_enabled", i + 1);
 	bool en = obs_data_get_bool(settings, key);
-	const char *names[] = {"kind",        "shape",     "outline_only", "polygon_sides", "ring_thickness",
+	const char *names[] = {"kind",        "shape",     "outline_only", "polygon_sides", "stroke_thickness",
 			       "color",       "image_path", "source_name",  "size",          "rotation",
 			       "density"};
 	for (size_t k = 0; k < sizeof(names) / sizeof(names[0]); ++k) {
@@ -350,8 +348,8 @@ static void add_item_group(obs_properties_t *root, struct cpat_renderer *r, int 
 
 	snprintf(key, sizeof(key), "item_%d_polygon_sides", i + 1);
 	obs_properties_add_int_slider(grp, key, obs_module_text("Constellations.Shape.PolySides"), 3, 24, 1);
-	snprintf(key, sizeof(key), "item_%d_ring_thickness", i + 1);
-	obs_properties_add_float_slider(grp, key, obs_module_text("Constellations.Shape.RingThickness"), 0.02, 1.0,
+	snprintf(key, sizeof(key), "item_%d_stroke_thickness", i + 1);
+	obs_properties_add_float_slider(grp, key, obs_module_text("Constellations.Shape.StrokeThickness"), 0.02, 1.0,
 					0.01);
 	snprintf(key, sizeof(key), "item_%d_color", i + 1);
 	obs_properties_add_color_alpha(grp, key, obs_module_text("Constellations.Shape.Color"));
@@ -449,19 +447,10 @@ static void cpat_item_update(struct cpat_item *it, obs_data_t *settings, int ind
 #define IK(name) (snprintf(key, sizeof(key), "item_%d_%s", index + 1, name), key)
 	it->enabled = obs_data_get_bool(settings, IK("enabled"));
 	it->kind = (int)obs_data_get_int(settings, IK("kind"));
-	int loaded_shape = (int)obs_data_get_int(settings, IK("shape"));
+	it->shape = (int)obs_data_get_int(settings, IK("shape"));
 	it->outline_only = obs_data_get_bool(settings, IK("outline_only"));
-	if (loaded_shape == CSHAPE_RING_LEGACY) {
-		// Migrate the deprecated ring shape to circle + outline-only so
-		// scenes saved with the old enum keep their visual on load.
-		loaded_shape = CSHAPE_CIRCLE;
-		it->outline_only = true;
-		obs_data_set_int(settings, IK("shape"), CSHAPE_CIRCLE);
-		obs_data_set_bool(settings, IK("outline_only"), true);
-	}
-	it->shape = loaded_shape;
 	it->polygon_sides = (int)obs_data_get_int(settings, IK("polygon_sides"));
-	it->ring_thickness = (float)obs_data_get_double(settings, IK("ring_thickness"));
+	it->stroke_thickness = (float)obs_data_get_double(settings, IK("stroke_thickness"));
 	uint32_t c = (uint32_t)obs_data_get_int(settings, IK("color"));
 	vec4_from_rgba(&it->color, c);
 
@@ -658,9 +647,9 @@ static void set_common_uniforms(struct cpat_renderer *r, struct cpat_item *it, u
 	p = gs_effect_get_param_by_name(r->effect, "polygon_sides");
 	if (p)
 		gs_effect_set_int(p, it->polygon_sides);
-	p = gs_effect_get_param_by_name(r->effect, "ring_thickness");
+	p = gs_effect_get_param_by_name(r->effect, "stroke_thickness");
 	if (p)
-		gs_effect_set_float(p, it->ring_thickness);
+		gs_effect_set_float(p, it->stroke_thickness);
 	p = gs_effect_get_param_by_name(r->effect, "outline_only");
 	if (p)
 		gs_effect_set_float(p, it->outline_only ? 1.0f : 0.0f);

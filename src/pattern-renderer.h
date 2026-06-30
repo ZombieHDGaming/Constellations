@@ -19,7 +19,7 @@ struct cpat_item {
 	int kind;
 	int shape;
 	int polygon_sides;
-	float ring_thickness;
+	float stroke_thickness;
 	bool outline_only;
 	struct vec4 color;
 

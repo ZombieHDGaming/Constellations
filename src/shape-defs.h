@@ -12,15 +12,12 @@ the Free Software Foundation; either version 2 of the License, or
 
 enum constellations_shape {
 	CSHAPE_CIRCLE = 0,
-	// Legacy: now expressed as CSHAPE_CIRCLE with the per-item outline-only
-	// toggle set. Kept in the enum so old scenes can be migrated on load.
-	CSHAPE_RING_LEGACY = 1,
-	CSHAPE_CROSS = 2,
-	CSHAPE_SQUARE = 3,
-	CSHAPE_POLYGON = 4,
-	CSHAPE_SQUIRCLE = 5,
-	CSHAPE_HLINE = 6,
-	CSHAPE_VLINE = 7,
+	CSHAPE_CROSS = 1,
+	CSHAPE_SQUARE = 2,
+	CSHAPE_POLYGON = 3,
+	CSHAPE_SQUIRCLE = 4,
+	CSHAPE_HLINE = 5,
+	CSHAPE_VLINE = 6,
 };
 
 enum constellations_item_kind {
