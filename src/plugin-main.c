@@ -1,6 +1,6 @@
 /*
-Plugin Name
-Copyright (C) <Year> <Developer> <Email Address>
+Constellations
+Copyright (C) 2026 Eion Dailey <Eiondailey@live.com>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -19,16 +19,32 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <obs-module.h>
 #include <plugin-support.h>
 
+#include "shape-defs.h"
+
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
 
+MODULE_EXPORT const char *obs_module_description(void)
+{
+	return "Constellations — tiled shape backgrounds, filters, and shape-based transitions for OBS.";
+}
+
+MODULE_EXPORT const char *obs_module_name(void)
+{
+	return "Constellations";
+}
+
 bool obs_module_load(void)
 {
-	obs_log(LOG_INFO, "plugin loaded successfully (version %s)", PLUGIN_VERSION);
+	obs_log(LOG_INFO, "Constellations loading (version %s)", PLUGIN_VERSION);
+	constellations_register_pattern_source();
+	constellations_register_pattern_filter();
+	constellations_register_shapes_transition();
+	obs_log(LOG_INFO, "Constellations loaded");
 	return true;
 }
 
 void obs_module_unload(void)
 {
-	obs_log(LOG_INFO, "plugin unloaded");
+	obs_log(LOG_INFO, "Constellations unloaded");
 }

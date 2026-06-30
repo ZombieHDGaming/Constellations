@@ -1,0 +1,236 @@
+// Constellations - Tiled SDF pattern effect
+// (c) 2026 Eion Dailey - GPLv2+
+
+uniform float4x4 ViewProj;
+
+uniform float2 canvas_size;
+uniform float2 anchor;
+uniform float cell_size;
+uniform float shape_size;
+uniform float shape_rotation;
+uniform float4 shape_color;
+uniform int shape_kind;
+uniform int polygon_sides;
+uniform float ring_thickness;
+
+uniform float motion_phase;
+uniform float2 motion_dir;
+uniform float alt_lines;
+uniform float drift_speed_amt;
+uniform float drift_loc_amt;
+uniform float item_seed;
+
+uniform float vignette_enabled;
+uniform float2 vignette_center;
+uniform float vignette_size_px;
+uniform float vignette_direction;
+uniform int vignette_shape;
+uniform int vignette_polygon_sides;
+uniform float vignette_softness;
+uniform float vignette_inverted;
+
+uniform texture2d cell_texture;
+
+sampler_state TileSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData v_out;
+	v_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	v_out.uv  = v_in.uv;
+	return v_out;
+}
+
+float sd_circle(float2 p, float r)
+{
+	return length(p) - r;
+}
+
+float sd_ring(float2 p, float r, float thick)
+{
+	float d = length(p) - r;
+	return abs(d) - thick * 0.5;
+}
+
+float sd_box(float2 p, float2 b)
+{
+	float2 q = abs(p) - b;
+	return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+}
+
+float sd_cross(float2 p, float arm_len, float arm_thick)
+{
+	float h = sd_box(p, float2(arm_len, arm_thick));
+	float v = sd_box(p, float2(arm_thick, arm_len));
+	return min(h, v);
+}
+
+float sd_polygon(float2 p, float r, int n)
+{
+	int sides = n;
+	if (sides < 3) sides = 3;
+	float fn = float(sides);
+	float ang = atan2(p.x, p.y);
+	float sector = 6.2831853 / fn;
+	float idx = floor(ang / sector + 0.5);
+	float a = idx * sector;
+	float ca = cos(a);
+	float sa = sin(a);
+	float2 pr = float2(ca * p.x - sa * p.y, sa * p.x + ca * p.y);
+	return pr.y - r * cos(sector * 0.5);
+}
+
+float sd_squircle(float2 p, float r)
+{
+	float2 ap = abs(p);
+	float ax = max(ap.x, 1.0e-5);
+	float ay = max(ap.y, 1.0e-5);
+	float k = pow(pow(ax, 4.0) + pow(ay, 4.0), 0.25);
+	return k - r;
+}
+
+float hash11(float2 p, float seed)
+{
+	return frac(sin(dot(p + seed, float2(127.1, 311.7))) * 43758.5453);
+}
+
+float2 hash22(float2 p, float seed)
+{
+	return float2(hash11(p, seed), hash11(p + 17.0, seed + 1.7));
+}
+
+float vignette_mask_calc(float2 px)
+{
+	if (vignette_enabled < 0.5) return 1.0;
+	float2 d = px - vignette_center;
+	float r = max(vignette_size_px, 1.0);
+	float v = 0.0;
+	if (vignette_shape == 0) {
+		v = length(d) / r;
+	} else if (vignette_shape == 1) {
+		float2 dir = float2(cos(vignette_direction), sin(vignette_direction));
+		v = (dot(d, dir) / r) * 0.5 + 0.5;
+	} else if (vignette_shape == 2) {
+		float ca = cos(-vignette_direction);
+		float sa = sin(-vignette_direction);
+		float2 rd = float2(ca * d.x - sa * d.y, sa * d.x + ca * d.y);
+		v = max(abs(rd.x), abs(rd.y)) / r;
+	} else {
+		float ca = cos(-vignette_direction);
+		float sa = sin(-vignette_direction);
+		float2 rd = float2(ca * d.x - sa * d.y, sa * d.x + ca * d.y);
+		float sd = sd_polygon(rd, r, vignette_polygon_sides);
+		v = sd / r + 1.0;
+	}
+	float soft = max(vignette_softness, 0.001);
+	float a = 1.0 - smoothstep(1.0 - soft, 1.0, v);
+	if (vignette_inverted > 0.5) a = 1.0 - a;
+	return saturate(a);
+}
+
+float2 cell_coords(float2 frag_px)
+{
+	float cs = max(cell_size, 1.0);
+	float2 pos = frag_px - anchor;
+	float2 perp = float2(-motion_dir.y, motion_dir.x);
+
+	float m_along = dot(pos, motion_dir);
+	float m_perp  = dot(pos, perp);
+
+	float row = floor(m_perp / cs);
+	float col_shift = motion_phase;
+	if (alt_lines > 0.5 && frac(row * 0.5) > 0.25)
+		col_shift = -col_shift;
+	if (drift_speed_amt > 0.0) {
+		float s = (hash11(float2(row, 7.0), item_seed) - 0.5) * 2.0 * drift_speed_amt;
+		col_shift *= (1.0 + s);
+	}
+	m_along -= col_shift;
+
+	float col = floor(m_along / cs);
+	float la = m_along - col * cs - cs * 0.5;
+	float lp = m_perp  - row * cs - cs * 0.5;
+
+	if (drift_loc_amt > 0.0) {
+		float2 j = (hash22(float2(col, row) + 0.5, item_seed) - 0.5) * 2.0 * drift_loc_amt * cs;
+		la -= j.x;
+		lp -= j.y;
+	}
+
+	return float2(la, lp);
+}
+
+float2 rotate2(float2 p, float a)
+{
+	float c = cos(a);
+	float s = sin(a);
+	return float2(c * p.x - s * p.y, s * p.x + c * p.y);
+}
+
+float shape_sdf(float2 p)
+{
+	float r = shape_size * 0.5;
+	if (shape_kind == 0) return sd_circle(p, r);
+	if (shape_kind == 1) return sd_ring(p, r, max(ring_thickness, 0.001) * shape_size);
+	if (shape_kind == 2) return sd_cross(p, r, max(ring_thickness, 0.05) * shape_size * 0.5);
+	if (shape_kind == 3) return sd_box(p, float2(r, r));
+	if (shape_kind == 4) return sd_polygon(p, r, polygon_sides);
+	if (shape_kind == 5) return sd_squircle(p, r);
+	if (shape_kind == 6) return abs(p.y) - r;
+	return abs(p.x) - r;
+}
+
+float4 PSShape(VertData v_in) : TARGET
+{
+	float2 frag_px = v_in.uv * canvas_size;
+	float2 p = cell_coords(frag_px);
+	p = rotate2(p, shape_rotation);
+	float d = shape_sdf(p);
+	float edge = max(fwidth(d), 0.5);
+	float alpha = 1.0 - smoothstep(-edge, edge, d);
+	alpha *= vignette_mask_calc(frag_px);
+	return float4(shape_color.rgb, shape_color.a * alpha);
+}
+
+float4 PSImage(VertData v_in) : TARGET
+{
+	float2 frag_px = v_in.uv * canvas_size;
+	float2 p = cell_coords(frag_px);
+	p = rotate2(p, shape_rotation);
+	float half_size = shape_size * 0.5;
+	if (abs(p.x) > half_size || abs(p.y) > half_size) {
+		return float4(0.0, 0.0, 0.0, 0.0);
+	}
+	float2 uv = (p / shape_size) + 0.5;
+	float4 tex = cell_texture.Sample(TileSampler, uv);
+	tex.a *= shape_color.a * vignette_mask_calc(frag_px);
+	tex.rgb *= shape_color.a;
+	return tex;
+}
+
+technique DrawShape
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSShape(v_in);
+	}
+}
+
+technique DrawImage
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSImage(v_in);
+	}
+}
