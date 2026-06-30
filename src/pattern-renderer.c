@@ -397,8 +397,8 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 	obs_property_list_add_int(vs, obs_module_text("Constellations.Vignette.Shape.Polygon"), CVIGN_POLYGON);
 	obs_properties_add_int_slider(vg, "vignette_polygon_sides",
 				      obs_module_text("Constellations.Vignette.PolygonSides"), 3, 24, 1);
-	obs_properties_add_float_slider(vg, "vignette_softness", obs_module_text("Constellations.Vignette.Softness"),
-					0.0, 1.0, 0.01);
+	obs_properties_add_float_slider(vg, "vignette_softness", obs_module_text("Constellations.Vignette.Falloff"),
+					0.0, 4.0, 0.01);
 	obs_properties_add_bool(vg, "vignette_inverted", obs_module_text("Constellations.Vignette.Inverted"));
 	obs_properties_add_group(props, "vignette_group", obs_module_text("Constellations.Group.Vignette"),
 				 OBS_GROUP_NORMAL, vg);
