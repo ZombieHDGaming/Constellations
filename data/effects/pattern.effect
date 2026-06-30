@@ -137,7 +137,7 @@ float vignette_mask_calc(float2 px)
 	return saturate(a);
 }
 
-float2 cell_coords(float2 frag_px)
+float2 cell_local_at(float2 frag_px, int dcol, int drow)
 {
 	float cs = max(cell_size, 1.0);
 	float2 pos = frag_px - anchor;
@@ -146,7 +146,8 @@ float2 cell_coords(float2 frag_px)
 	float m_along = dot(pos, motion_dir);
 	float m_perp  = dot(pos, perp);
 
-	float row = floor(m_perp / cs);
+	// Round-to-nearest so cell (0,0) is centered on the anchor.
+	float row = floor(m_perp / cs + 0.5) + float(drow);
 	float col_shift = motion_phase;
 	if (alt_lines > 0.5 && frac(row * 0.5) > 0.25)
 		col_shift = -col_shift;
@@ -154,11 +155,11 @@ float2 cell_coords(float2 frag_px)
 		float s = (hash11(float2(row, 7.0), item_seed) - 0.5) * 2.0 * drift_speed_amt;
 		col_shift *= (1.0 + s);
 	}
-	m_along -= col_shift;
+	float m_along_shifted = m_along - col_shift;
+	float col = floor(m_along_shifted / cs + 0.5) + float(dcol);
 
-	float col = floor(m_along / cs);
-	float la = m_along - col * cs - cs * 0.5;
-	float lp = m_perp  - row * cs - cs * 0.5;
+	float la = m_along_shifted - col * cs;
+	float lp = m_perp - row * cs;
 
 	if (drift_loc_amt > 0.0) {
 		float2 j = (hash22(float2(col, row) + 0.5, item_seed) - 0.5) * 2.0 * drift_loc_amt * cs;
@@ -167,6 +168,20 @@ float2 cell_coords(float2 frag_px)
 	}
 
 	return float2(la, lp);
+}
+
+// Number of neighbor cells (in each direction) whose shape can reach the
+// current fragment. Without this, large shapes get clipped at cell borders
+// and form a visible grid; with it we evaluate every contributing instance.
+int tile_reach()
+{
+	float cs = max(cell_size, 1.0);
+	// 0.71 covers the diagonal extent of squares/crosses.
+	float extent = shape_size * 0.71 + drift_loc_amt * cs;
+	float r = ceil(extent / cs - 0.5);
+	if (r < 0.0) r = 0.0;
+	if (r > 8.0) r = 8.0;
+	return int(r);
 }
 
 float2 rotate2(float2 p, float a)
@@ -192,11 +207,18 @@ float shape_sdf(float2 p)
 float4 PSShape(VertData v_in) : TARGET
 {
 	float2 frag_px = v_in.uv * canvas_size;
-	float2 p = cell_coords(frag_px);
-	p = rotate2(p, shape_rotation);
-	float d = shape_sdf(p);
-	float edge = max(fwidth(d), 0.5);
-	float alpha = 1.0 - smoothstep(-edge, edge, d);
+	int reach = tile_reach();
+	float best_d = 1.0e6;
+	for (int dr = -reach; dr <= reach; ++dr) {
+		for (int dc = -reach; dc <= reach; ++dc) {
+			float2 p = cell_local_at(frag_px, dc, dr);
+			p = rotate2(p, shape_rotation);
+			float d = shape_sdf(p);
+			best_d = min(best_d, d);
+		}
+	}
+	float edge = max(fwidth(best_d), 0.5);
+	float alpha = 1.0 - smoothstep(-edge, edge, best_d);
 	alpha *= vignette_mask_calc(frag_px);
 	return float4(shape_color.rgb, shape_color.a * alpha);
 }
@@ -204,13 +226,29 @@ float4 PSShape(VertData v_in) : TARGET
 float4 PSImage(VertData v_in) : TARGET
 {
 	float2 frag_px = v_in.uv * canvas_size;
-	float2 p = cell_coords(frag_px);
-	p = rotate2(p, shape_rotation);
+	int reach = tile_reach();
 	float half_size = shape_size * 0.5;
-	if (abs(p.x) > half_size || abs(p.y) > half_size) {
-		return float4(0.0, 0.0, 0.0, 0.0);
+
+	float best_dist2 = 1.0e12;
+	float2 best_p = float2(0.0, 0.0);
+	float found = 0.0;
+	for (int dr = -reach; dr <= reach; ++dr) {
+		for (int dc = -reach; dc <= reach; ++dc) {
+			float2 p = cell_local_at(frag_px, dc, dr);
+			p = rotate2(p, shape_rotation);
+			if (abs(p.x) <= half_size && abs(p.y) <= half_size) {
+				float d2 = dot(p, p);
+				if (d2 < best_dist2) {
+					best_dist2 = d2;
+					best_p = p;
+					found = 1.0;
+				}
+			}
+		}
 	}
-	float2 uv = (p / shape_size) + 0.5;
+	if (found < 0.5)
+		return float4(0.0, 0.0, 0.0, 0.0);
+	float2 uv = (best_p / shape_size) + 0.5;
 	float4 tex = cell_texture.Sample(TileSampler, uv);
 	tex.a *= shape_color.a * vignette_mask_calc(frag_px);
 	tex.rgb *= shape_color.a;
