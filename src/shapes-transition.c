@@ -477,7 +477,7 @@ static bool prop_shape_changed(obs_properties_t *props, obs_property_t *p, obs_d
 	if (poly)
 		obs_property_set_visible(poly, s == CSHAPE_POLYGON);
 	if (ring)
-		obs_property_set_visible(ring, s == CSHAPE_RING || s == CSHAPE_CROSS);
+		obs_property_set_visible(ring, s == CSHAPE_RING_LEGACY || s == CSHAPE_CROSS);
 	return true;
 }
 
@@ -614,7 +614,7 @@ static obs_properties_t *cshape_properties(void *data)
 	p = obs_properties_add_list(props, "shape", obs_module_text("Constellations.Shape"), OBS_COMBO_TYPE_LIST,
 				    OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.Circle"), CSHAPE_CIRCLE);
-	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.Ring"), CSHAPE_RING);
+	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.Ring"), CSHAPE_RING_LEGACY);
 	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.Cross"), CSHAPE_CROSS);
 	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.Square"), CSHAPE_SQUARE);
 	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.Polygon"), CSHAPE_POLYGON);

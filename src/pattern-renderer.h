@@ -20,6 +20,7 @@ struct cpat_item {
 	int shape;
 	int polygon_sides;
 	float ring_thickness;
+	bool outline_only;
 	struct vec4 color;
 
 	char *image_path;
@@ -48,6 +49,7 @@ struct cpat_renderer {
 	float anchor_x_pct;
 	float anchor_y_pct;
 
+	uint32_t item_count;
 	struct cpat_item items[CONSTELLATIONS_MAX_ITEMS];
 
 	float motion_angle_deg;

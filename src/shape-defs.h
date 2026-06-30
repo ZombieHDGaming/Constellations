@@ -12,7 +12,9 @@ the Free Software Foundation; either version 2 of the License, or
 
 enum constellations_shape {
 	CSHAPE_CIRCLE = 0,
-	CSHAPE_RING = 1,
+	// Legacy: now expressed as CSHAPE_CIRCLE with the per-item outline-only
+	// toggle set. Kept in the enum so old scenes can be migrated on load.
+	CSHAPE_RING_LEGACY = 1,
 	CSHAPE_CROSS = 2,
 	CSHAPE_SQUARE = 3,
 	CSHAPE_POLYGON = 4,
@@ -63,7 +65,7 @@ enum constellations_shape_zoom_dir {
 	CZOOM_OUT = 1,
 };
 
-#define CONSTELLATIONS_MAX_ITEMS 4
+#define CONSTELLATIONS_MAX_ITEMS 32
 
 void constellations_register_pattern_source(void);
 void constellations_register_pattern_filter(void);
