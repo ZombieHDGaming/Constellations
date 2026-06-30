@@ -129,6 +129,7 @@ void cpat_renderer_set_defaults(obs_data_t *settings, bool include_canvas)
 	}
 	obs_data_set_default_double(settings, "anchor_x_pct", 50.0);
 	obs_data_set_default_double(settings, "anchor_y_pct", 50.0);
+	obs_data_set_default_int(settings, "item_count", 1);
 
 	for (int i = 0; i < CONSTELLATIONS_MAX_ITEMS; ++i) {
 		char key[64];
@@ -137,7 +138,8 @@ void cpat_renderer_set_defaults(obs_data_t *settings, bool include_canvas)
 		obs_data_set_default_int(settings, DK("kind"), CITEM_SHAPE);
 		obs_data_set_default_int(settings, DK("shape"), CSHAPE_CIRCLE);
 		obs_data_set_default_int(settings, DK("polygon_sides"), 6);
-		obs_data_set_default_double(settings, DK("ring_thickness"), 0.2);
+		obs_data_set_default_double(settings, DK("stroke_thickness"), 0.2);
+		obs_data_set_default_bool(settings, DK("outline_only"), false);
 		obs_data_set_default_int(settings, DK("color"), 0xFFFFFFFF);
 		obs_data_set_default_string(settings, DK("image_path"), "");
 		obs_data_set_default_string(settings, DK("source_name"), "");
@@ -228,6 +230,8 @@ static void apply_item_kind_visibility(obs_properties_t *props, obs_data_t *sett
 	int kind = (int)obs_data_get_int(settings, key);
 	snprintf(key, sizeof(key), "item_%d_shape", i + 1);
 	int shape_v = (int)obs_data_get_int(settings, key);
+	snprintf(key, sizeof(key), "item_%d_outline_only", i + 1);
+	bool outline = obs_data_get_bool(settings, key);
 
 #define VIS(name_, on)                                                \
 	do {                                                          \
@@ -238,8 +242,9 @@ static void apply_item_kind_visibility(obs_properties_t *props, obs_data_t *sett
 	} while (0)
 
 	VIS("shape", kind == CITEM_SHAPE);
+	VIS("outline_only", kind == CITEM_SHAPE);
 	VIS("polygon_sides", kind == CITEM_SHAPE && shape_v == CSHAPE_POLYGON);
-	VIS("ring_thickness", kind == CITEM_SHAPE && (shape_v == CSHAPE_RING || shape_v == CSHAPE_CROSS));
+	VIS("stroke_thickness", kind == CITEM_SHAPE && (shape_v == CSHAPE_CROSS || outline));
 	VIS("color", kind == CITEM_SHAPE);
 	VIS("image_path", kind == CITEM_IMAGE);
 	VIS("source_name", kind == CITEM_SOURCE);
@@ -251,8 +256,9 @@ static void apply_item_enabled_visibility(obs_properties_t *props, obs_data_t *s
 	char key[64];
 	snprintf(key, sizeof(key), "item_%d_enabled", i + 1);
 	bool en = obs_data_get_bool(settings, key);
-	const char *names[] = {"kind",     "shape",     "polygon_sides", "ring_thickness", "color",
-			       "image_path", "source_name", "size",        "rotation",       "density"};
+	const char *names[] = {"kind",        "shape",     "outline_only", "polygon_sides", "stroke_thickness",
+			       "color",       "image_path", "source_name",  "size",          "rotation",
+			       "density"};
 	for (size_t k = 0; k < sizeof(names) / sizeof(names[0]); ++k) {
 		snprintf(key, sizeof(key), "item_%d_%s", i + 1, names[k]);
 		obs_property_t *pp = obs_properties_get(props, key);
@@ -261,6 +267,29 @@ static void apply_item_enabled_visibility(obs_properties_t *props, obs_data_t *s
 	}
 	if (en)
 		apply_item_kind_visibility(props, settings, i);
+}
+
+static void apply_item_count_visibility(obs_properties_t *props, obs_data_t *settings)
+{
+	int count = (int)obs_data_get_int(settings, "item_count");
+	if (count < 1)
+		count = 1;
+	if (count > CONSTELLATIONS_MAX_ITEMS)
+		count = CONSTELLATIONS_MAX_ITEMS;
+	char gid[64];
+	for (int i = 0; i < CONSTELLATIONS_MAX_ITEMS; ++i) {
+		snprintf(gid, sizeof(gid), "item_%d_group", i + 1);
+		obs_property_t *gp = obs_properties_get(props, gid);
+		if (gp)
+			obs_property_set_visible(gp, i < count);
+	}
+}
+
+static bool item_count_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(p);
+	apply_item_count_visibility(props, settings);
+	return true;
 }
 
 static bool item_kind_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
@@ -305,7 +334,6 @@ static void add_item_group(obs_properties_t *root, struct cpat_renderer *r, int 
 	obs_property_t *sh = obs_properties_add_list(grp, key, obs_module_text("Constellations.Shape"),
 						     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(sh, obs_module_text("Constellations.Shape.Circle"), CSHAPE_CIRCLE);
-	obs_property_list_add_int(sh, obs_module_text("Constellations.Shape.Ring"), CSHAPE_RING);
 	obs_property_list_add_int(sh, obs_module_text("Constellations.Shape.Cross"), CSHAPE_CROSS);
 	obs_property_list_add_int(sh, obs_module_text("Constellations.Shape.Square"), CSHAPE_SQUARE);
 	obs_property_list_add_int(sh, obs_module_text("Constellations.Shape.Polygon"), CSHAPE_POLYGON);
@@ -314,10 +342,14 @@ static void add_item_group(obs_properties_t *root, struct cpat_renderer *r, int 
 	obs_property_list_add_int(sh, obs_module_text("Constellations.Shape.VLine"), CSHAPE_VLINE);
 	obs_property_set_modified_callback(sh, item_kind_modified);
 
+	snprintf(key, sizeof(key), "item_%d_outline_only", i + 1);
+	obs_property_t *ol = obs_properties_add_bool(grp, key, obs_module_text("Constellations.Item.OutlineOnly"));
+	obs_property_set_modified_callback(ol, item_kind_modified);
+
 	snprintf(key, sizeof(key), "item_%d_polygon_sides", i + 1);
 	obs_properties_add_int_slider(grp, key, obs_module_text("Constellations.Shape.PolySides"), 3, 24, 1);
-	snprintf(key, sizeof(key), "item_%d_ring_thickness", i + 1);
-	obs_properties_add_float_slider(grp, key, obs_module_text("Constellations.Shape.RingThickness"), 0.02, 1.0,
+	snprintf(key, sizeof(key), "item_%d_stroke_thickness", i + 1);
+	obs_properties_add_float_slider(grp, key, obs_module_text("Constellations.Shape.StrokeThickness"), 0.02, 1.0,
 					0.01);
 	snprintf(key, sizeof(key), "item_%d_color", i + 1);
 	obs_properties_add_color_alpha(grp, key, obs_module_text("Constellations.Shape.Color"));
@@ -363,6 +395,11 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 		obs_properties_add_float_slider(props, "anchor_y_pct", obs_module_text("Constellations.Anchor.Y"),
 						0.0, 100.0, 0.5);
 	}
+
+	obs_property_t *ic = obs_properties_add_int_slider(props, "item_count",
+							   obs_module_text("Constellations.ItemCount"), 1,
+							   CONSTELLATIONS_MAX_ITEMS, 1);
+	obs_property_set_modified_callback(ic, item_count_modified);
 
 	for (int i = 0; i < CONSTELLATIONS_MAX_ITEMS; ++i)
 		add_item_group(props, r, i);
@@ -411,8 +448,9 @@ static void cpat_item_update(struct cpat_item *it, obs_data_t *settings, int ind
 	it->enabled = obs_data_get_bool(settings, IK("enabled"));
 	it->kind = (int)obs_data_get_int(settings, IK("kind"));
 	it->shape = (int)obs_data_get_int(settings, IK("shape"));
+	it->outline_only = obs_data_get_bool(settings, IK("outline_only"));
 	it->polygon_sides = (int)obs_data_get_int(settings, IK("polygon_sides"));
-	it->ring_thickness = (float)obs_data_get_double(settings, IK("ring_thickness"));
+	it->stroke_thickness = (float)obs_data_get_double(settings, IK("stroke_thickness"));
 	uint32_t c = (uint32_t)obs_data_get_int(settings, IK("color"));
 	vec4_from_rgba(&it->color, c);
 
@@ -478,6 +516,13 @@ void cpat_renderer_update(struct cpat_renderer *r, obs_data_t *settings, bool in
 	r->anchor_x_pct = (float)obs_data_get_double(settings, "anchor_x_pct");
 	r->anchor_y_pct = (float)obs_data_get_double(settings, "anchor_y_pct");
 
+	int ic = (int)obs_data_get_int(settings, "item_count");
+	if (ic < 1)
+		ic = 1;
+	if (ic > CONSTELLATIONS_MAX_ITEMS)
+		ic = CONSTELLATIONS_MAX_ITEMS;
+	r->item_count = (uint32_t)ic;
+
 	for (int i = 0; i < CONSTELLATIONS_MAX_ITEMS; ++i)
 		cpat_item_update(&r->items[i], settings, i, r->owner);
 
@@ -502,7 +547,10 @@ void cpat_renderer_tick(struct cpat_renderer *r, float seconds)
 {
 	r->phase += (double)r->motion_speed * (double)seconds;
 
-	for (int i = 0; i < CONSTELLATIONS_MAX_ITEMS; ++i) {
+	uint32_t count = r->item_count;
+	if (count > CONSTELLATIONS_MAX_ITEMS)
+		count = CONSTELLATIONS_MAX_ITEMS;
+	for (uint32_t i = 0; i < count; ++i) {
 		struct cpat_item *it = &r->items[i];
 		if (!it->enabled || it->kind != CITEM_SOURCE || !it->source_ref || !it->source_texrender)
 			continue;
@@ -599,9 +647,12 @@ static void set_common_uniforms(struct cpat_renderer *r, struct cpat_item *it, u
 	p = gs_effect_get_param_by_name(r->effect, "polygon_sides");
 	if (p)
 		gs_effect_set_int(p, it->polygon_sides);
-	p = gs_effect_get_param_by_name(r->effect, "ring_thickness");
+	p = gs_effect_get_param_by_name(r->effect, "stroke_thickness");
 	if (p)
-		gs_effect_set_float(p, it->ring_thickness);
+		gs_effect_set_float(p, it->stroke_thickness);
+	p = gs_effect_get_param_by_name(r->effect, "outline_only");
+	if (p)
+		gs_effect_set_float(p, it->outline_only ? 1.0f : 0.0f);
 
 	float mang = r->motion_angle_deg * (float)(M_PI / 180.0);
 	struct vec2 mdir = {cosf(mang), sinf(mang)};
@@ -659,7 +710,11 @@ void cpat_renderer_render_items(struct cpat_renderer *r, uint32_t w, uint32_t h)
 	if (!r->effect || w == 0 || h == 0)
 		return;
 
-	for (int i = 0; i < CONSTELLATIONS_MAX_ITEMS; ++i) {
+	uint32_t count = r->item_count;
+	if (count > CONSTELLATIONS_MAX_ITEMS)
+		count = CONSTELLATIONS_MAX_ITEMS;
+
+	for (uint32_t i = 0; i < count; ++i) {
 		struct cpat_item *it = &r->items[i];
 		if (!it->enabled)
 			continue;
@@ -670,7 +725,7 @@ void cpat_renderer_render_items(struct cpat_renderer *r, uint32_t w, uint32_t h)
 	gs_blend_state_push();
 	gs_blend_function(GS_BLEND_SRCALPHA, GS_BLEND_INVSRCALPHA);
 
-	for (int i = 0; i < CONSTELLATIONS_MAX_ITEMS; ++i) {
+	for (uint32_t i = 0; i < count; ++i) {
 		struct cpat_item *it = &r->items[i];
 		if (!it->enabled)
 			continue;
@@ -691,7 +746,7 @@ void cpat_renderer_render_items(struct cpat_renderer *r, uint32_t w, uint32_t h)
 			technique = "DrawImage";
 		}
 
-		set_common_uniforms(r, it, w, h, i);
+		set_common_uniforms(r, it, w, h, (int)i);
 
 		if (tex) {
 			gs_eparam_t *tp = gs_effect_get_param_by_name(r->effect, "cell_texture");
