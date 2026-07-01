@@ -21,7 +21,7 @@ uniform float drift_speed_amt;
 uniform float drift_loc_amt;
 uniform float item_seed;
 
-uniform float layout_mode;   // 0 layered, 1 step-repeat
+uniform float layout_mode;   // 0 layered, 1 step-repeat, 2 grid (random mix)
 uniform float step_index;    // this item's slot in step-repeat rotation
 uniform float step_count;    // total enabled items participating in step-repeat
 
@@ -155,7 +155,7 @@ float2 cell_local_at(float2 frag_px, int dcol, int drow, out float2 cell_id)
 		col_shift *= (1.0 + s);
 	}
 	float brick_shift = 0.0;
-	if (layout_mode > 0.5 && frac(row * 0.5) > 0.25)
+	if (layout_mode > 0.5 && layout_mode < 1.5 && frac(row * 0.5) > 0.25)
 		brick_shift = cs * 0.5;
 	float m_along_shifted = m_along - col_shift - brick_shift;
 	float col = floor(m_along_shifted / cs + 0.5) + float(dcol);
@@ -178,6 +178,15 @@ bool cell_belongs_to_this_item(float2 cell_id)
 	if (layout_mode < 0.5)
 		return true;
 	float n = max(step_count, 1.0);
+	if (layout_mode > 1.5) {
+		// Grid: each cell picks a pseudo-random item. The hash seed is a
+		// constant shared by every item's pass, so all passes agree and
+		// exactly one item claims each cell.
+		float pick = floor(hash11(cell_id + 0.5, 31.7) * n);
+		if (pick > n - 1.0)
+			pick = n - 1.0;
+		return abs(pick - step_index) < 0.5;
+	}
 	float raw = cell_id.x;
 	float rem = raw - floor(raw / n) * n;
 	return abs(rem - step_index) < 0.5;
@@ -189,12 +198,9 @@ bool cell_belongs_to_this_item(float2 cell_id)
 int tile_reach()
 {
 	float cs = max(cell_size, 1.0);
-	// 0.71 covers the diagonal extent of squares/crosses.
+	// 0.71 covers the diagonal extent of squares/crosses. The outline stroke
+	// sits entirely inside the shape edge, so it needs no extra reach.
 	float extent = shape_size * 0.71;
-	// Outline mode pushes the visible band stroke_thickness*shape_size/2 past
-	// the shape boundary, so the influence radius grows accordingly.
-	if (outline_only > 0.5)
-		extent += max(stroke_thickness, 0.001) * shape_size * 0.5;
 	extent += drift_loc_amt * cs;
 	float r = ceil(extent / cs - 0.5);
 	if (r < 0.0) r = 0.0;
@@ -238,9 +244,11 @@ float4 PSShape(VertData v_in) : TARGET
 		}
 	}
 	if (outline_only > 0.5) {
-		// Replace the filled SDF with a stroke of width stroke_thickness * shape_size
-		// centered on the shape's edge. abs(d) is the distance to the outline.
-		best_d = abs(best_d) - max(stroke_thickness, 0.001) * shape_size * 0.5;
+		// Replace the filled SDF with a stroke of width stroke_thickness *
+		// shape_size drawn on the inner edge: the band spans d in [-w, 0] so
+		// the outline never extends past the shape's footprint.
+		float w = max(stroke_thickness, 0.001) * shape_size;
+		best_d = max(best_d, -best_d - w);
 	}
 	// best_d is discontinuous where cell ownership changes (step-and-repeat)
 	// or across brick-shifted rows, so an unbounded fwidth() explodes there

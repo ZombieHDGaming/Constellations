@@ -66,6 +66,7 @@ enum constellations_shape_zoom_dir {
 enum constellations_layout_mode {
 	CLAYOUT_LAYERED = 0,
 	CLAYOUT_STEP_REPEAT = 1,
+	CLAYOUT_GRID = 2,
 };
 
 enum constellations_tiling_mode {
