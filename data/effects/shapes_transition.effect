@@ -20,6 +20,7 @@ uniform int polygon_sides;
 uniform float stroke_thickness;
 uniform int use_source_texture;
 uniform float cell_size;
+uniform int tiling_mode;         // 0 grid, 1 tight (hex offset, full coverage)
 uniform float gap_distance;
 uniform float4 gap_color;
 uniform float4 shape_color;
@@ -76,6 +77,12 @@ float sd_squircle(float2 p, float r)
 	float k = pow(pow(ax, 4.0) + pow(ay, 4.0), 0.25);
 	return k - r;
 }
+float cell_gap_sdf(float2 p, float r, int tiling)
+{
+	if (tiling == 1) return sd_polygon(p, r, 6);
+	return sd_box(p, float2(r, r));
+}
+
 float shape_sdf(float2 p, float r)
 {
 	if (shape_kind == 0) return sd_circle(p, r);
@@ -133,14 +140,48 @@ float4 PSDraw(VertData v_in) : TARGET
 	float cs = max(cell_size, 4.0);
 	float gap_half = gap_distance * 0.5;
 	float2 pos = frag_px - anchor;
-	float2 cell_xy = floor(pos / cs);
-	float2 local = pos - cell_xy * cs - cs * 0.5;
-	float2 cell_center = cell_xy * cs + cs * 0.5 + anchor;
+	float2 cell_xy;
+	float2 local;
+	float2 cell_center;
+	float half_shape;
+
+	if (tiling_mode == 1) {
+		float row_height = cs * 0.8660254; // sqrt(3)/2
+		float r0 = floor(pos.y / row_height);
+		float best_dist_sq = 1.0e20;
+		float2 best_center = float2(0.0, 0.0);
+		float2 best_xy = float2(0.0, 0.0);
+		for (int dr = -1; dr <= 1; dr++) {
+			float r = r0 + float(dr);
+			float row_parity = r - floor(r * 0.5) * 2.0;
+			float x_offset = row_parity * cs * 0.5;
+			float base_col = floor((pos.x - x_offset) / cs);
+			for (int dc = 0; dc <= 1; dc++) {
+				float c = base_col + float(dc);
+				float2 cand = float2(c * cs + x_offset + cs * 0.5,
+						     r * row_height + row_height * 0.5);
+				float2 diff = pos - cand;
+				float dist_sq = dot(diff, diff);
+				if (dist_sq < best_dist_sq) {
+					best_dist_sq = dist_sq;
+					best_center = cand;
+					best_xy = float2(c, r);
+				}
+			}
+		}
+		cell_xy = best_xy;
+		cell_center = best_center + anchor;
+		local = frag_px - cell_center;
+		half_shape = max((cs * 0.5773503) - gap_half, 1.0); // 1/sqrt(3)
+	} else {
+		cell_xy = floor(pos / cs);
+		local = pos - cell_xy * cs - cs * 0.5;
+		cell_center = cell_xy * cs + cs * 0.5 + anchor;
+		half_shape = max((cs * 0.5) - gap_half, 1.0);
+	}
 
 	float d_wave = wavefront_d(cell_center);
 	float jitter = lerp(fade_min, fade_max, hash11(cell_xy + 0.5));
-
-	float half_shape = max((cs * 0.5) - gap_half, 1.0);
 
 	if (transition_mode == 1) {
 		float p_local = saturate(progress * (1.0 + jitter) - jitter * d_wave - d_wave * (1.0 - jitter));
@@ -171,7 +212,7 @@ float4 PSDraw(VertData v_in) : TARGET
 
 		float4 out_col = b;
 		if (gap_distance > 0.001) {
-			float gd = sd_box(local, float2(half_shape, half_shape));
+			float gd = cell_gap_sdf(local, half_shape, tiling_mode);
 			float edge2 = max(fwidth(gd), 0.75);
 			float gmask = 1.0 - smoothstep(-edge2, edge2, gd);
 			float gap_alpha = (1.0 - gmask) * gap_color.a * fade;
@@ -204,7 +245,7 @@ float4 PSDraw(VertData v_in) : TARGET
 
 	float4 base = a;
 	if (gap_distance > 0.001) {
-		float gd = sd_box(local, float2(half_shape, half_shape));
+		float gd = cell_gap_sdf(local, half_shape, tiling_mode);
 		float edge2 = max(fwidth(gd), 0.75);
 		float gmask = 1.0 - smoothstep(-edge2, edge2, gd);
 		float gap_alpha = (1.0 - gmask) * gap_color.a * cell_alpha;

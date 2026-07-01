@@ -46,6 +46,7 @@ struct cshape_transition {
 	struct vec4 gap_color;
 
 	float cell_size;
+	int tiling_mode;
 	float fade_min;
 	float fade_max;
 
@@ -208,6 +209,7 @@ static void cshape_update(void *data, obs_data_t *settings)
 	t->cell_size = (float)obs_data_get_double(settings, "cell_size");
 	if (t->cell_size < 4.0f)
 		t->cell_size = 4.0f;
+	t->tiling_mode = (int)obs_data_get_int(settings, "tiling_mode");
 	t->fade_min = (float)obs_data_get_double(settings, "fade_min");
 	t->fade_max = (float)obs_data_get_double(settings, "fade_max");
 	if (t->fade_max < t->fade_min)
@@ -355,6 +357,9 @@ static void cshape_video_callback(void *data, gs_texture_t *a, gs_texture_t *b, 
 	p = gs_effect_get_param_by_name(t->effect, "cell_size");
 	if (p)
 		gs_effect_set_float(p, t->cell_size);
+	p = gs_effect_get_param_by_name(t->effect, "tiling_mode");
+	if (p)
+		gs_effect_set_int(p, t->tiling_mode);
 	p = gs_effect_get_param_by_name(t->effect, "gap_distance");
 	if (p)
 		gs_effect_set_float(p, t->gap_enabled ? t->gap_distance : 0.0f);
@@ -611,6 +616,11 @@ static obs_properties_t *cshape_properties(void *data)
 	obs_properties_add_float_slider(props, "cell_size", obs_module_text("Constellations.Transition.CellSize"), 4.0,
 					512.0, 1.0);
 
+	p = obs_properties_add_list(props, "tiling_mode", obs_module_text("Constellations.Transition.Tiling"),
+				    OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(p, obs_module_text("Constellations.Transition.Tiling.Grid"), CTILE_GRID);
+	obs_property_list_add_int(p, obs_module_text("Constellations.Transition.Tiling.Tight"), CTILE_TIGHT);
+
 	p = obs_properties_add_list(props, "shape", obs_module_text("Constellations.Shape"), OBS_COMBO_TYPE_LIST,
 				    OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.Circle"), CSHAPE_CIRCLE);
@@ -692,6 +702,7 @@ static void cshape_defaults(obs_data_t *settings)
 	obs_data_set_default_double(settings, "stroke_thickness", 0.2);
 	obs_data_set_default_int(settings, "shape_color", 0xFFFFFFFF);
 	obs_data_set_default_double(settings, "cell_size", 64.0);
+	obs_data_set_default_int(settings, "tiling_mode", CTILE_GRID);
 
 	obs_data_set_default_bool(settings, "use_source_texture", false);
 	obs_data_set_default_string(settings, "texture_source_name", "");

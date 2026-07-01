@@ -62,6 +62,11 @@ enum constellations_shape_zoom_dir {
 	CZOOM_OUT = 1,
 };
 
+enum constellations_tiling_mode {
+	CTILE_GRID = 0,
+	CTILE_TIGHT = 1,
+};
+
 #define CONSTELLATIONS_MAX_ITEMS 32
 
 void constellations_register_pattern_source(void);
