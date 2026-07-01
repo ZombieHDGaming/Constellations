@@ -126,6 +126,8 @@ void cpat_renderer_set_defaults(obs_data_t *settings, bool include_canvas)
 		obs_data_set_default_int(settings, "width", 1920);
 		obs_data_set_default_int(settings, "height", 1080);
 		obs_data_set_default_int(settings, "background_color", 0xFF101820);
+	} else {
+		obs_data_set_default_int(settings, "background_color", 0x00000000);
 	}
 	obs_data_set_default_double(settings, "anchor_x_pct", 50.0);
 	obs_data_set_default_double(settings, "anchor_y_pct", 50.0);
@@ -482,6 +484,8 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 		obs_properties_add_group(props, "canvas_group", obs_module_text("Constellations.Group.Canvas"),
 					 OBS_GROUP_NORMAL, canvas);
 	} else {
+		obs_properties_add_color_alpha(props, "background_color",
+					       obs_module_text("Constellations.Canvas.BackgroundColor"));
 		obs_properties_add_float_slider(props, "anchor_x_pct", obs_module_text("Constellations.Anchor.X"),
 						0.0, 100.0, 0.5);
 		obs_properties_add_float_slider(props, "anchor_y_pct", obs_module_text("Constellations.Anchor.Y"),
@@ -614,12 +618,10 @@ void cpat_renderer_update(struct cpat_renderer *r, obs_data_t *settings, bool in
 			r->width = 1920;
 		if (r->height == 0)
 			r->height = 1080;
-		uint32_t bg = (uint32_t)obs_data_get_int(settings, "background_color");
-		vec4_from_rgba(&r->background_color, bg);
-		r->has_background = (r->background_color.w > 0.0001f);
-	} else {
-		r->has_background = false;
 	}
+	uint32_t bg = (uint32_t)obs_data_get_int(settings, "background_color");
+	vec4_from_rgba(&r->background_color, bg);
+	r->has_background = (r->background_color.w > 0.0001f);
 	r->anchor_x_pct = (float)obs_data_get_double(settings, "anchor_x_pct");
 	r->anchor_y_pct = (float)obs_data_get_double(settings, "anchor_y_pct");
 
@@ -676,20 +678,23 @@ void cpat_renderer_tick(struct cpat_renderer *r, float seconds)
 	}
 }
 
-void cpat_renderer_render_background(struct cpat_renderer *r)
+void cpat_renderer_render_background(struct cpat_renderer *r, uint32_t w, uint32_t h)
 {
-	if (!r->has_background || r->width == 0 || r->height == 0)
+	if (!r->has_background || w == 0 || h == 0)
 		return;
 	gs_effect_t *solid = obs_get_base_effect(OBS_EFFECT_SOLID);
 	gs_eparam_t *color = gs_effect_get_param_by_name(solid, "color");
 	gs_effect_set_vec4(color, &r->background_color);
 
+	gs_blend_state_push();
+	gs_blend_function(GS_BLEND_SRCALPHA, GS_BLEND_INVSRCALPHA);
 	gs_technique_t *tech = gs_effect_get_technique(solid, "Solid");
 	gs_technique_begin(tech);
 	gs_technique_begin_pass(tech, 0);
-	gs_draw_sprite(NULL, 0, r->width, r->height);
+	gs_draw_sprite(NULL, 0, w, h);
 	gs_technique_end_pass(tech);
 	gs_technique_end(tech);
+	gs_blend_state_pop();
 }
 
 static void render_item_source_to_texrender(struct cpat_item *it)

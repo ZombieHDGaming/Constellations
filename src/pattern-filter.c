@@ -70,6 +70,7 @@ static void cpat_filter_render(void *data, gs_effect_t *effect)
 		return;
 	obs_source_process_filter_end(f->self, obs_get_base_effect(OBS_EFFECT_DEFAULT), w, h);
 
+	cpat_renderer_render_background(&f->r, w, h);
 	cpat_renderer_render_items(&f->r, w, h);
 }
 
