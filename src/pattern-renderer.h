@@ -52,6 +52,8 @@ struct cpat_renderer {
 	uint32_t item_count;
 	struct cpat_item items[CONSTELLATIONS_MAX_ITEMS];
 
+	int layout_mode;
+
 	float motion_angle_deg;
 	float motion_speed;
 	bool alternating_lines;
@@ -81,5 +83,5 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 void cpat_renderer_update(struct cpat_renderer *r, obs_data_t *settings, bool include_canvas);
 
 void cpat_renderer_tick(struct cpat_renderer *r, float seconds);
-void cpat_renderer_render_background(struct cpat_renderer *r);
+void cpat_renderer_render_background(struct cpat_renderer *r, uint32_t w, uint32_t h);
 void cpat_renderer_render_items(struct cpat_renderer *r, uint32_t w, uint32_t h);

@@ -57,7 +57,7 @@ static void cpat_source_render(void *data, gs_effect_t *effect)
 {
 	UNUSED_PARAMETER(effect);
 	struct cpat_source *s = data;
-	cpat_renderer_render_background(&s->r);
+	cpat_renderer_render_background(&s->r, s->r.width, s->r.height);
 	cpat_renderer_render_items(&s->r, s->r.width, s->r.height);
 }
 
