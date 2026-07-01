@@ -310,7 +310,7 @@ static void apply_density_visibility(obs_properties_t *props, obs_data_t *settin
 		if (!dp)
 			continue;
 		bool show = en;
-		if (mode == CLAYOUT_STEP_REPEAT)
+		if (mode == CLAYOUT_STEP_REPEAT || mode == CLAYOUT_GRID)
 			show = en && (i == first_enabled);
 		obs_property_set_visible(dp, show);
 	}
@@ -497,6 +497,7 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 						     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(lm, obs_module_text("Constellations.Layout.Layered"), CLAYOUT_LAYERED);
 	obs_property_list_add_int(lm, obs_module_text("Constellations.Layout.StepRepeat"), CLAYOUT_STEP_REPEAT);
+	obs_property_list_add_int(lm, obs_module_text("Constellations.Layout.Grid"), CLAYOUT_GRID);
 	obs_property_set_modified_callback(lm, layout_mode_modified);
 
 	for (int i = 0; i < CONSTELLATIONS_MAX_ITEMS; ++i)
@@ -598,12 +599,6 @@ static void cpat_item_update(struct cpat_item *it, obs_data_t *settings, int ind
 	it->density = (float)obs_data_get_double(settings, IK("density"));
 	if (it->density <= 0.0f)
 		it->density = 0.1f;
-
-	const float golden_x = 0.6180339887f;
-	const float golden_y = 0.3819660113f;
-	float fi = (float)index;
-	it->sub_offset_x = fmodf(fi * golden_x, 1.0f);
-	it->sub_offset_y = fmodf(fi * golden_y, 1.0f);
 #undef IK
 }
 
@@ -733,17 +728,17 @@ static void set_common_uniforms(struct cpat_renderer *r, struct cpat_item *it, u
 	if (p)
 		gs_effect_set_vec2(p, &canvas);
 
-	bool step_repeat = (r->layout_mode == CLAYOUT_STEP_REPEAT);
-	float density = step_repeat ? shared_density : it->density;
+	bool shared_grid = (r->layout_mode == CLAYOUT_STEP_REPEAT || r->layout_mode == CLAYOUT_GRID);
+	float density = shared_grid ? shared_density : it->density;
 	if (density <= 0.0f)
 		density = 0.1f;
 	float cell = 100.0f / density;
 	if (cell < 2.0f)
 		cell = 2.0f;
-	float sub_off_x = step_repeat ? 0.0f : it->sub_offset_x;
-	float sub_off_y = step_repeat ? 0.0f : it->sub_offset_y;
-	float anchor_x = (r->anchor_x_pct / 100.0f) * canvas.x + sub_off_x * cell;
-	float anchor_y = (r->anchor_y_pct / 100.0f) * canvas.y + sub_off_y * cell;
+	/* Every item shares the same anchor so layered items stack on the same
+	 * origin points instead of being offset from each other. */
+	float anchor_x = (r->anchor_x_pct / 100.0f) * canvas.x;
+	float anchor_y = (r->anchor_y_pct / 100.0f) * canvas.y;
 	struct vec2 anchor = {anchor_x, anchor_y};
 	p = gs_effect_get_param_by_name(r->effect, "anchor");
 	if (p)
@@ -798,7 +793,7 @@ static void set_common_uniforms(struct cpat_renderer *r, struct cpat_item *it, u
 
 	p = gs_effect_get_param_by_name(r->effect, "layout_mode");
 	if (p)
-		gs_effect_set_float(p, step_repeat ? 1.0f : 0.0f);
+		gs_effect_set_float(p, (float)r->layout_mode);
 	p = gs_effect_get_param_by_name(r->effect, "step_index");
 	if (p)
 		gs_effect_set_float(p, (float)step_index);
@@ -808,8 +803,6 @@ static void set_common_uniforms(struct cpat_renderer *r, struct cpat_item *it, u
 
 	float min_dim = (canvas.x < canvas.y) ? canvas.x : canvas.y;
 	float vsz = r->vignette_size * 0.5f * min_dim;
-	/* The vignette has its own anchor; the pattern anchor above carries
-	 * per-item sub-offsets, which would shift the mask per item. */
 	struct vec2 vcenter = {(r->vignette_anchor_x_pct / 100.0f) * canvas.x,
 			       (r->vignette_anchor_y_pct / 100.0f) * canvas.y};
 	float vang = r->vignette_direction_deg * (float)(M_PI / 180.0);
@@ -850,7 +843,7 @@ void cpat_renderer_render_items(struct cpat_renderer *r, uint32_t w, uint32_t h)
 
 	uint32_t step_count = 0;
 	float shared_density = 2.0f;
-	if (r->layout_mode == CLAYOUT_STEP_REPEAT) {
+	if (r->layout_mode == CLAYOUT_STEP_REPEAT || r->layout_mode == CLAYOUT_GRID) {
 		for (uint32_t i = 0; i < count; ++i) {
 			if (r->items[i].enabled) {
 				if (step_count == 0)

@@ -35,9 +35,6 @@ struct cpat_item {
 	float size;
 	float rotation_deg;
 	float density;
-
-	float sub_offset_x;
-	float sub_offset_y;
 };
 
 struct cpat_renderer {
