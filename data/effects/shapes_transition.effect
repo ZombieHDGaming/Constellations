@@ -99,6 +99,41 @@ float hash11(float2 p)
 	return frac(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
 }
 
+// Equivalent "radius" at which the selected shape, growing from the anchor,
+// first reaches p, i.e. the r solving shape_sdf(p, r) == 0. Inside-out and
+// outside-in waves advance in this metric so the front that covers the screen
+// matches the selected shape instead of always being a circle.
+float shape_radius_metric(float2 p)
+{
+	if (shape_kind == 1) {
+		float k = max(stroke_thickness, 0.05);
+		float h = max(abs(p.x), abs(p.y) / k);
+		float v = max(abs(p.y), abs(p.x) / k);
+		return min(h, v);
+	}
+	if (shape_kind == 2) return max(abs(p.x), abs(p.y));
+	if (shape_kind == 3) {
+		int sides = polygon_sides;
+		if (sides < 3) sides = 3;
+		float fn = float(sides);
+		float ang = atan2(p.x, p.y);
+		float sector = 6.2831853 / fn;
+		float idx = floor(ang / sector + 0.5);
+		float a = idx * sector;
+		float ry = sin(a) * p.x + cos(a) * p.y;
+		return max(ry, 0.0) / cos(sector * 0.5);
+	}
+	if (shape_kind == 4) {
+		float2 ap = abs(p);
+		float ax = max(ap.x, 1.0e-5);
+		float ay = max(ap.y, 1.0e-5);
+		return pow(pow(ax, 4.0) + pow(ay, 4.0), 0.25);
+	}
+	if (shape_kind == 5) return abs(p.y);
+	if (shape_kind == 6) return abs(p.x);
+	return length(p);
+}
+
 float wavefront_d(float2 frag_px)
 {
 	float2 d = frag_px - anchor;
@@ -108,9 +143,9 @@ float wavefront_d(float2 frag_px)
 		float range = max(canvas_size.x, canvas_size.y);
 		return saturate(t / range + 0.5);
 	} else if (transition_type == 1) {
-		return saturate(length(d) / max_radius);
+		return saturate(shape_radius_metric(d) / max_radius);
 	} else if (transition_type == 2) {
-		return saturate(1.0 - length(d) / max_radius);
+		return saturate(1.0 - shape_radius_metric(d) / max_radius);
 	}
 	float range = max(canvas_size.x, canvas_size.y);
 	return saturate(abs(dot(d, directional_dir)) / range * 2.0);
@@ -207,8 +242,10 @@ float4 PSDraw(VertData v_in) : TARGET
 
 		float4 src;
 		if (use_source_texture > 0) {
-			float2 uv = clamp((local / max(half_shape * 2.0, 1.0)) + 0.5, 0.0, 1.0);
-			src = cell_texture.Sample(TileSampler, uv);
+			// Screen-space sample: the source spans the whole transition
+			// and the shapes act as a mask over it, instead of the full
+			// source being squeezed into every cell.
+			src = cell_texture.Sample(TileSampler, v_in.uv);
 		} else {
 			src = a;
 		}
@@ -277,8 +314,9 @@ float4 PSDraw(VertData v_in) : TARGET
 
 	float4 cell_color;
 	if (use_source_texture > 0) {
-		float2 uv = clamp((local / max(half_shape * 2.0, 1.0)) + 0.5, 0.0, 1.0);
-		cell_color = cell_texture.Sample(TileSampler, uv);
+		// Screen-space sample so the texture covers the entire transition
+		// region; each shape reveals its portion of it.
+		cell_color = cell_texture.Sample(TileSampler, v_in.uv);
 	} else {
 		cell_color = shape_color;
 	}

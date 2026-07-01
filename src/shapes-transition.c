@@ -255,7 +255,22 @@ static void cshape_render_texture_source(struct cshape_transition *t, uint32_t c
 		struct vec4 clear;
 		vec4_zero(&clear);
 		gs_clear(GS_CLEAR_COLOR, &clear, 0.0f, 0);
-		gs_ortho(0.0f, (float)sw, 0.0f, (float)sh, -100.0f, 100.0f);
+		/* Center-crop the source to the canvas aspect ratio so it covers
+		 * the full transition region without stretching. */
+		float src_aspect = (float)sw / (float)sh;
+		float dst_aspect = (float)cx / (float)cy;
+		float ow = (float)sw;
+		float oh = (float)sh;
+		float ox = 0.0f;
+		float oy = 0.0f;
+		if (src_aspect > dst_aspect) {
+			ow = (float)sh * dst_aspect;
+			ox = ((float)sw - ow) * 0.5f;
+		} else if (src_aspect < dst_aspect) {
+			oh = (float)sw / dst_aspect;
+			oy = ((float)sh - oh) * 0.5f;
+		}
+		gs_ortho(ox, ox + ow, oy, oy + oh, -100.0f, 100.0f);
 		obs_source_video_render(src);
 		gs_texrender_end(t->texture_source_texrender);
 	}
@@ -275,8 +290,8 @@ struct cshape_render_ctx {
 	gs_texture_t *b_tex;
 };
 
-static bool cshape_audio_render(void *data, uint64_t *ts_out, struct obs_source_audio_mix *audio_output, uint32_t mixers,
-				size_t channels, size_t sample_rate)
+static bool cshape_audio_render(void *data, uint64_t *ts_out, struct obs_source_audio_mix *audio_output,
+				uint32_t mixers, size_t channels, size_t sample_rate)
 {
 	struct cshape_transition *t = data;
 	return obs_transition_audio_render(t->self, ts_out, audio_output, mixers, channels, sample_rate, NULL, NULL);
@@ -591,8 +606,7 @@ static obs_properties_t *cshape_properties(void *data)
 	obs_property_list_add_int(p, obs_module_text("Constellations.Transition.Mode.Dissolve"), CTRANS_MODE_DISSOLVE);
 	obs_property_list_add_int(p, obs_module_text("Constellations.Transition.Mode.ShapeZoom"),
 				  CTRANS_MODE_SHAPE_ZOOM);
-	obs_property_list_add_int(p, obs_module_text("Constellations.Transition.Mode.Keyhole"),
-				  CTRANS_MODE_KEYHOLE);
+	obs_property_list_add_int(p, obs_module_text("Constellations.Transition.Mode.Keyhole"), CTRANS_MODE_KEYHOLE);
 	obs_property_set_modified_callback(p, prop_mode_changed);
 
 	p = obs_properties_add_list(props, "transition_type", obs_module_text("Constellations.Transition.Type"),
@@ -603,12 +617,11 @@ static obs_properties_t *cshape_properties(void *data)
 				  CTRANS_TYPE_INSIDE_OUT);
 	obs_property_list_add_int(p, obs_module_text("Constellations.Transition.Type.OutsideIn"),
 				  CTRANS_TYPE_OUTSIDE_IN);
-	obs_property_list_add_int(p, obs_module_text("Constellations.Transition.Type.Mirrored"),
-				  CTRANS_TYPE_MIRRORED);
+	obs_property_list_add_int(p, obs_module_text("Constellations.Transition.Type.Mirrored"), CTRANS_TYPE_MIRRORED);
 	obs_property_set_modified_callback(p, prop_type_changed);
 
-	obs_properties_add_float_slider(props, "directional_angle",
-					obs_module_text("Constellations.Transition.Angle"), 0.0, 360.0, 1.0);
+	obs_properties_add_float_slider(props, "directional_angle", obs_module_text("Constellations.Transition.Angle"),
+					0.0, 360.0, 1.0);
 
 	obs_properties_add_float_slider(props, "anchor_x_pct", obs_module_text("Constellations.Anchor.X"), 0.0, 100.0,
 					0.5);
