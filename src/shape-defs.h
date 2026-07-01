@@ -37,6 +37,7 @@ enum constellations_transition_mode {
 	CTRANS_MODE_COVER = 0,
 	CTRANS_MODE_DISSOLVE = 1,
 	CTRANS_MODE_SHAPE_ZOOM = 2,
+	CTRANS_MODE_KEYHOLE = 3,
 };
 
 enum constellations_transition_type {
@@ -60,6 +61,11 @@ enum constellations_logo_display {
 enum constellations_shape_zoom_dir {
 	CZOOM_IN = 0,
 	CZOOM_OUT = 1,
+};
+
+enum constellations_tiling_mode {
+	CTILE_GRID = 0,
+	CTILE_TIGHT = 1,
 };
 
 #define CONSTELLATIONS_MAX_ITEMS 32
