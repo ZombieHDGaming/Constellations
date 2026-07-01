@@ -162,6 +162,8 @@ void cpat_renderer_set_defaults(obs_data_t *settings, bool include_canvas)
 
 	obs_data_set_default_bool(settings, "vignette_enabled", false);
 	obs_data_set_default_double(settings, "vignette_size", 0.7);
+	obs_data_set_default_double(settings, "vignette_anchor_x_pct", 50.0);
+	obs_data_set_default_double(settings, "vignette_anchor_y_pct", 50.0);
 	obs_data_set_default_double(settings, "vignette_direction", 0.0);
 	obs_data_set_default_int(settings, "vignette_shape", CVIGN_CIRCLE);
 	obs_data_set_default_int(settings, "vignette_polygon_sides", 6);
@@ -259,8 +261,8 @@ static void apply_item_enabled_visibility(obs_properties_t *props, obs_data_t *s
 	char key[64];
 	snprintf(key, sizeof(key), "item_%d_enabled", i + 1);
 	bool en = obs_data_get_bool(settings, key);
-	const char *names[] = {"kind",        "shape",     "outline_only", "polygon_sides", "stroke_thickness",
-			       "color",       "image_path", "source_name",  "size",          "rotation",
+	const char *names[] = {"kind",   "shape",      "outline_only", "polygon_sides", "stroke_thickness",
+			       "color",  "image_path", "source_name",  "size",          "rotation",
 			       "density"};
 	for (size_t k = 0; k < sizeof(names) / sizeof(names[0]); ++k) {
 		snprintf(key, sizeof(key), "item_%d_%s", i + 1, names[k]);
@@ -316,20 +318,14 @@ static void apply_density_visibility(obs_properties_t *props, obs_data_t *settin
 
 static void apply_motion_visibility(obs_properties_t *props, obs_data_t *settings)
 {
-	float speed = (float)obs_data_get_double(settings, "motion_speed");
-	bool has_motion = speed > 0.001f || speed < -0.001f;
+	/* Never gate visibility on motion_speed: toggling rows while the user
+	 * drags the slider through zero makes the whole dialog jitter. */
 	bool sd = obs_data_get_bool(settings, "speed_drift");
 	bool ld = obs_data_get_bool(settings, "location_drift");
 	obs_property_t *pp;
-	pp = obs_properties_get(props, "alternating_lines");
-	if (pp)
-		obs_property_set_visible(pp, has_motion);
-	pp = obs_properties_get(props, "speed_drift");
-	if (pp)
-		obs_property_set_visible(pp, has_motion);
 	pp = obs_properties_get(props, "speed_drift_amount");
 	if (pp)
-		obs_property_set_visible(pp, has_motion && sd);
+		obs_property_set_visible(pp, sd);
 	pp = obs_properties_get(props, "location_drift_amount");
 	if (pp)
 		obs_property_set_visible(pp, ld);
@@ -339,8 +335,9 @@ static void apply_vignette_visibility(obs_properties_t *props, obs_data_t *setti
 {
 	bool en = obs_data_get_bool(settings, "vignette_enabled");
 	int shape = (int)obs_data_get_int(settings, "vignette_shape");
-	const char *names[] = {"vignette_size",         "vignette_direction", "vignette_shape",
-			       "vignette_polygon_sides", "vignette_softness",  "vignette_inverted"};
+	const char *names[] = {"vignette_size",      "vignette_anchor_x_pct", "vignette_anchor_y_pct",
+			       "vignette_direction", "vignette_shape",        "vignette_polygon_sides",
+			       "vignette_softness",  "vignette_inverted"};
 	for (size_t k = 0; k < sizeof(names) / sizeof(names[0]); k++) {
 		obs_property_t *pp = obs_properties_get(props, names[k]);
 		if (pp)
@@ -477,29 +474,27 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 		obs_properties_add_int(canvas, "height", obs_module_text("Constellations.Canvas.Height"), 1, 8192, 1);
 		obs_properties_add_color_alpha(canvas, "background_color",
 					       obs_module_text("Constellations.Canvas.BackgroundColor"));
-		obs_properties_add_float_slider(canvas, "anchor_x_pct", obs_module_text("Constellations.Anchor.X"),
-						0.0, 100.0, 0.5);
-		obs_properties_add_float_slider(canvas, "anchor_y_pct", obs_module_text("Constellations.Anchor.Y"),
-						0.0, 100.0, 0.5);
+		obs_properties_add_float_slider(canvas, "anchor_x_pct", obs_module_text("Constellations.Anchor.X"), 0.0,
+						100.0, 0.5);
+		obs_properties_add_float_slider(canvas, "anchor_y_pct", obs_module_text("Constellations.Anchor.Y"), 0.0,
+						100.0, 0.5);
 		obs_properties_add_group(props, "canvas_group", obs_module_text("Constellations.Group.Canvas"),
 					 OBS_GROUP_NORMAL, canvas);
 	} else {
 		obs_properties_add_color_alpha(props, "background_color",
 					       obs_module_text("Constellations.Canvas.BackgroundColor"));
-		obs_properties_add_float_slider(props, "anchor_x_pct", obs_module_text("Constellations.Anchor.X"),
-						0.0, 100.0, 0.5);
-		obs_properties_add_float_slider(props, "anchor_y_pct", obs_module_text("Constellations.Anchor.Y"),
-						0.0, 100.0, 0.5);
+		obs_properties_add_float_slider(props, "anchor_x_pct", obs_module_text("Constellations.Anchor.X"), 0.0,
+						100.0, 0.5);
+		obs_properties_add_float_slider(props, "anchor_y_pct", obs_module_text("Constellations.Anchor.Y"), 0.0,
+						100.0, 0.5);
 	}
 
-	obs_property_t *ic = obs_properties_add_int_slider(props, "item_count",
-							   obs_module_text("Constellations.ItemCount"), 1,
-							   CONSTELLATIONS_MAX_ITEMS, 1);
+	obs_property_t *ic = obs_properties_add_int_slider(
+		props, "item_count", obs_module_text("Constellations.ItemCount"), 1, CONSTELLATIONS_MAX_ITEMS, 1);
 	obs_property_set_modified_callback(ic, item_count_modified);
 
-	obs_property_t *lm = obs_properties_add_list(props, "layout_mode",
-						     obs_module_text("Constellations.Layout"), OBS_COMBO_TYPE_LIST,
-						     OBS_COMBO_FORMAT_INT);
+	obs_property_t *lm = obs_properties_add_list(props, "layout_mode", obs_module_text("Constellations.Layout"),
+						     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(lm, obs_module_text("Constellations.Layout.Layered"), CLAYOUT_LAYERED);
 	obs_property_list_add_int(lm, obs_module_text("Constellations.Layout.StepRepeat"), CLAYOUT_STEP_REPEAT);
 	obs_property_set_modified_callback(lm, layout_mode_modified);
@@ -510,12 +505,11 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 	obs_properties_t *motion = obs_properties_create();
 	obs_properties_add_float_slider(motion, "motion_angle", obs_module_text("Constellations.Motion.Angle"), 0.0,
 					360.0, 1.0);
-	obs_property_t *ms = obs_properties_add_float_slider(
-		motion, "motion_speed", obs_module_text("Constellations.Motion.Speed"), -500.0, 500.0, 1.0);
-	obs_property_set_modified_callback(ms, motion_modified);
+	obs_properties_add_float_slider(motion, "motion_speed", obs_module_text("Constellations.Motion.Speed"), -500.0,
+					500.0, 1.0);
 	obs_properties_add_bool(motion, "alternating_lines", obs_module_text("Constellations.Motion.Alternating"));
-	obs_property_t *sd = obs_properties_add_bool(motion, "speed_drift",
-						     obs_module_text("Constellations.Motion.SpeedDrift"));
+	obs_property_t *sd =
+		obs_properties_add_bool(motion, "speed_drift", obs_module_text("Constellations.Motion.SpeedDrift"));
 	obs_property_set_modified_callback(sd, motion_modified);
 	obs_properties_add_float_slider(motion, "speed_drift_amount",
 					obs_module_text("Constellations.Motion.SpeedDriftAmount"), 0.0, 1.0, 0.01);
@@ -528,11 +522,15 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 				 OBS_GROUP_NORMAL, motion);
 
 	obs_properties_t *vg = obs_properties_create();
-	obs_property_t *ve = obs_properties_add_bool(vg, "vignette_enabled",
-						     obs_module_text("Constellations.Vignette.Enabled"));
+	obs_property_t *ve =
+		obs_properties_add_bool(vg, "vignette_enabled", obs_module_text("Constellations.Vignette.Enabled"));
 	obs_property_set_modified_callback(ve, vignette_modified);
-	obs_properties_add_float_slider(vg, "vignette_size", obs_module_text("Constellations.Vignette.Size"), 0.01,
-					2.0, 0.01);
+	obs_properties_add_float_slider(vg, "vignette_size", obs_module_text("Constellations.Vignette.Size"), 0.01, 2.0,
+					0.01);
+	obs_properties_add_float_slider(vg, "vignette_anchor_x_pct", obs_module_text("Constellations.Vignette.AnchorX"),
+					0.0, 100.0, 0.5);
+	obs_properties_add_float_slider(vg, "vignette_anchor_y_pct", obs_module_text("Constellations.Vignette.AnchorY"),
+					0.0, 100.0, 0.5);
 	obs_properties_add_float_slider(vg, "vignette_direction", obs_module_text("Constellations.Vignette.Direction"),
 					0.0, 360.0, 1.0);
 	obs_property_t *vs = obs_properties_add_list(vg, "vignette_shape",
@@ -647,6 +645,8 @@ void cpat_renderer_update(struct cpat_renderer *r, obs_data_t *settings, bool in
 
 	r->vignette_enabled = obs_data_get_bool(settings, "vignette_enabled");
 	r->vignette_size = (float)obs_data_get_double(settings, "vignette_size");
+	r->vignette_anchor_x_pct = (float)obs_data_get_double(settings, "vignette_anchor_x_pct");
+	r->vignette_anchor_y_pct = (float)obs_data_get_double(settings, "vignette_anchor_y_pct");
 	r->vignette_direction_deg = (float)obs_data_get_double(settings, "vignette_direction");
 	r->vignette_shape = (int)obs_data_get_int(settings, "vignette_shape");
 	r->vignette_polygon_sides = (int)obs_data_get_int(settings, "vignette_polygon_sides");
@@ -808,7 +808,10 @@ static void set_common_uniforms(struct cpat_renderer *r, struct cpat_item *it, u
 
 	float min_dim = (canvas.x < canvas.y) ? canvas.x : canvas.y;
 	float vsz = r->vignette_size * 0.5f * min_dim;
-	struct vec2 vcenter = {anchor.x, anchor.y};
+	/* The vignette has its own anchor; the pattern anchor above carries
+	 * per-item sub-offsets, which would shift the mask per item. */
+	struct vec2 vcenter = {(r->vignette_anchor_x_pct / 100.0f) * canvas.x,
+			       (r->vignette_anchor_y_pct / 100.0f) * canvas.y};
 	float vang = r->vignette_direction_deg * (float)(M_PI / 180.0);
 	p = gs_effect_get_param_by_name(r->effect, "vignette_enabled");
 	if (p)

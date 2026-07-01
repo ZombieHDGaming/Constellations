@@ -64,6 +64,8 @@ struct cpat_renderer {
 
 	bool vignette_enabled;
 	float vignette_size;
+	float vignette_anchor_x_pct;
+	float vignette_anchor_y_pct;
 	float vignette_direction_deg;
 	int vignette_shape;
 	int vignette_polygon_sides;
