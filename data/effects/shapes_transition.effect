@@ -184,7 +184,11 @@ float4 PSDraw(VertData v_in) : TARGET
 	float jitter = lerp(fade_min, fade_max, hash11(cell_xy + 0.5));
 
 	if (transition_mode == 1) {
-		float p_local = saturate(progress * (1.0 + jitter) - jitter * d_wave - d_wave * (1.0 - jitter));
+		// Extend progress range so every cell fully finishes at progress=1
+		// and no cell has started at progress=0, regardless of d_wave / jitter.
+		float soft = 0.3;
+		float prog_ext = progress * (1.0 + soft * 2.0) - soft;
+		float p_local = saturate((prog_ext - d_wave) * 8.0 + 0.5 - jitter);
 		float scale = 1.0;
 		float fade = 1.0;
 		if (dissolve_type == 1) {
@@ -222,8 +226,13 @@ float4 PSDraw(VertData v_in) : TARGET
 		return out_col;
 	}
 
-	float ph1 = saturate(progress * 2.0);
-	float ph2 = saturate(progress * 2.0 - 1.0);
+	// Extend each phase's range beyond [0,1] so the soft wave (+0.5 bias)
+	// still fully saturates to 0 at the start and 1 at the end for every
+	// d_wave / jitter. Without this, cells at d_wave=1 with jitter=0 end at
+	// t1=t2=0.5 (only 50% blended to b), leaving the transition incomplete.
+	float soft = 0.3;
+	float ph1 = saturate(progress * 2.0) * (1.0 + soft * 2.0) - soft;
+	float ph2 = saturate(progress * 2.0 - 1.0) * (1.0 + soft * 2.0) - soft;
 	float t1 = saturate((ph1 - d_wave) * 8.0 + 0.5 - jitter);
 	float t2 = saturate((ph2 - d_wave) * 8.0 + 0.5 - jitter);
 
