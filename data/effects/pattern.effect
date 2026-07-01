@@ -20,8 +20,13 @@ uniform float alt_lines;
 uniform float drift_speed_amt;
 uniform float drift_loc_amt;
 uniform float item_seed;
+uniform float elapsed_time;  // seconds since the source was created
 
-uniform float layout_mode;   // 0 layered, 1 step-repeat, 2 grid (random mix)
+uniform float twinkle_amount; // fraction of cells that twinkle (0 disables)
+uniform float twinkle_speed;  // twinkle cycles per second
+
+uniform float layout_mode;   // 0 layered, 1 step-repeat, 2 grid
+uniform float grid_random;   // grid mode: 1 = random cell assignment, 0 = ordered
 uniform float step_index;    // this item's slot in step-repeat rotation
 uniform float step_count;    // total enabled items participating in step-repeat
 
@@ -164,9 +169,14 @@ float2 cell_local_at(float2 frag_px, int dcol, int drow, out float2 cell_id)
 	float lp = m_perp - row * cs;
 
 	if (drift_loc_amt > 0.0) {
-		float2 j = (hash22(float2(col, row) + 0.5, item_seed) - 0.5) * 2.0 * drift_loc_amt * cs;
-		la -= j.x;
-		lp -= j.y;
+		// Animated wander: each cell's shape roams a Lissajous path around
+		// the cell center with its own random phase and rate. The slider
+		// sets how far it travels (up to drift_loc_amt * cell in each axis).
+		float2 ph = hash22(float2(col, row) + 0.5, item_seed) * 6.2831853;
+		float2 rate = hash22(float2(col, row) + 17.9, item_seed + 4.7) + 0.5;
+		float amp = drift_loc_amt * cs;
+		la -= sin(elapsed_time * rate.x + ph.x) * amp;
+		lp -= sin(elapsed_time * rate.y + ph.y) * amp;
 	}
 
 	cell_id = float2(col, row);
@@ -178,15 +188,16 @@ bool cell_belongs_to_this_item(float2 cell_id)
 	if (layout_mode < 0.5)
 		return true;
 	float n = max(step_count, 1.0);
-	if (layout_mode > 1.5) {
-		// Grid: each cell picks a pseudo-random item. The hash seed is a
-		// constant shared by every item's pass, so all passes agree and
-		// exactly one item claims each cell.
+	if (layout_mode > 1.5 && grid_random > 0.5) {
+		// Random grid: each cell picks a pseudo-random item. The hash seed
+		// is a constant shared by every item's pass, so all passes agree
+		// and exactly one item claims each cell.
 		float pick = floor(hash11(cell_id + 0.5, 31.7) * n);
 		if (pick > n - 1.0)
 			pick = n - 1.0;
 		return abs(pick - step_index) < 0.5;
 	}
+	// Step-and-repeat and ordered grid: items cycle by column.
 	float raw = cell_id.x;
 	float rem = raw - floor(raw / n) * n;
 	return abs(rem - step_index) < 0.5;
@@ -215,6 +226,19 @@ float2 rotate2(float2 p, float a)
 	return float2(c * p.x - s * p.y, s * p.x + c * p.y);
 }
 
+// Per-cell fade for the Twinkle effect. twinkle_amount selects which cells
+// participate; participants fade in and out on their own random phase and
+// rate, twinkle_speed cycles per second on average.
+float twinkle_alpha_calc(float2 cell_id)
+{
+	float sel = hash11(cell_id + 3.7, item_seed + 5.13);
+	if (sel > twinkle_amount)
+		return 1.0;
+	float ph = hash11(cell_id + 11.9, item_seed + 7.77) * 6.2831853;
+	float rate = 0.75 + 0.5 * hash11(cell_id + 27.3, item_seed + 2.19);
+	return sin(elapsed_time * twinkle_speed * 6.2831853 * rate + ph) * 0.5 + 0.5;
+}
+
 float shape_sdf(float2 p)
 {
 	float r = shape_size * 0.5;
@@ -231,31 +255,56 @@ float4 PSShape(VertData v_in) : TARGET
 {
 	float2 frag_px = v_in.uv * canvas_size;
 	int reach = tile_reach();
-	float best_d = 1.0e6;
-	for (int dr = -reach; dr <= reach; ++dr) {
-		for (int dc = -reach; dc <= reach; ++dc) {
-			float2 cid;
-			float2 p = cell_local_at(frag_px, dc, dr, cid);
-			if (!cell_belongs_to_this_item(cid))
-				continue;
-			p = rotate2(p, shape_rotation);
-			float d = shape_sdf(p);
-			best_d = min(best_d, d);
+	float stroke_w = max(stroke_thickness, 0.001) * shape_size;
+	float alpha;
+	if (twinkle_amount > 0.001) {
+		// Twinkle needs a per-cell fade, so coverage is computed per
+		// instance and combined with max() instead of taking the union
+		// SDF. The SDFs are true pixel distances, so a fixed ~0.75 px
+		// smoothing gives the same anti-aliasing as the fwidth path.
+		alpha = 0.0;
+		for (int dr = -reach; dr <= reach; ++dr) {
+			for (int dc = -reach; dc <= reach; ++dc) {
+				float2 cid;
+				float2 p = cell_local_at(frag_px, dc, dr, cid);
+				if (!cell_belongs_to_this_item(cid))
+					continue;
+				p = rotate2(p, shape_rotation);
+				float d = shape_sdf(p);
+				if (outline_only > 0.5)
+					d = max(d, -d - stroke_w);
+				float a = 1.0 - smoothstep(-0.75, 0.75, d);
+				alpha = max(alpha, a * twinkle_alpha_calc(cid));
+			}
 		}
+	} else {
+		float best_d = 1.0e6;
+		for (int dr = -reach; dr <= reach; ++dr) {
+			for (int dc = -reach; dc <= reach; ++dc) {
+				float2 cid;
+				float2 p = cell_local_at(frag_px, dc, dr, cid);
+				if (!cell_belongs_to_this_item(cid))
+					continue;
+				p = rotate2(p, shape_rotation);
+				float d = shape_sdf(p);
+				best_d = min(best_d, d);
+			}
+		}
+		if (outline_only > 0.5) {
+			// Replace the filled SDF with a stroke of width
+			// stroke_thickness * shape_size drawn on the inner edge: the
+			// band spans d in [-w, 0] so the outline never extends past
+			// the shape's footprint.
+			best_d = max(best_d, -best_d - stroke_w);
+		}
+		// best_d is discontinuous where cell ownership changes
+		// (step-and-repeat) or across brick-shifted rows, so an unbounded
+		// fwidth() explodes there and smoothstep leaves ~50% alpha seams
+		// along cell borders. The SDFs are true pixel distances, so the
+		// real edge width never exceeds ~2 px.
+		float edge = clamp(fwidth(best_d), 0.5, 2.0);
+		alpha = 1.0 - smoothstep(-edge, edge, best_d);
 	}
-	if (outline_only > 0.5) {
-		// Replace the filled SDF with a stroke of width stroke_thickness *
-		// shape_size drawn on the inner edge: the band spans d in [-w, 0] so
-		// the outline never extends past the shape's footprint.
-		float w = max(stroke_thickness, 0.001) * shape_size;
-		best_d = max(best_d, -best_d - w);
-	}
-	// best_d is discontinuous where cell ownership changes (step-and-repeat)
-	// or across brick-shifted rows, so an unbounded fwidth() explodes there
-	// and smoothstep leaves ~50% alpha seams along cell borders. The SDFs are
-	// true pixel distances, so the real edge width never exceeds ~2 px.
-	float edge = clamp(fwidth(best_d), 0.5, 2.0);
-	float alpha = 1.0 - smoothstep(-edge, edge, best_d);
 	alpha *= vignette_mask_calc(frag_px);
 	return float4(shape_color.rgb, shape_color.a * alpha);
 }
@@ -268,6 +317,7 @@ float4 PSImage(VertData v_in) : TARGET
 
 	float best_dist2 = 1.0e12;
 	float2 best_p = float2(0.0, 0.0);
+	float2 best_cid = float2(0.0, 0.0);
 	float found = 0.0;
 	for (int dr = -reach; dr <= reach; ++dr) {
 		for (int dc = -reach; dc <= reach; ++dc) {
@@ -281,6 +331,7 @@ float4 PSImage(VertData v_in) : TARGET
 				if (d2 < best_dist2) {
 					best_dist2 = d2;
 					best_p = p;
+					best_cid = cid;
 					found = 1.0;
 				}
 			}
@@ -291,6 +342,8 @@ float4 PSImage(VertData v_in) : TARGET
 	float2 uv = (best_p / shape_size) + 0.5;
 	float4 tex = cell_texture.Sample(TileSampler, uv);
 	tex.a *= shape_color.a * vignette_mask_calc(frag_px);
+	if (twinkle_amount > 0.001)
+		tex.a *= twinkle_alpha_calc(best_cid);
 	tex.rgb *= shape_color.a;
 	return tex;
 }

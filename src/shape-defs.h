@@ -69,6 +69,11 @@ enum constellations_layout_mode {
 	CLAYOUT_GRID = 2,
 };
 
+enum constellations_grid_order {
+	CGRID_RANDOM = 0,
+	CGRID_ORDERED = 1,
+};
+
 enum constellations_tiling_mode {
 	CTILE_GRID = 0,
 	CTILE_TIGHT = 1,
