@@ -21,6 +21,10 @@ uniform float drift_speed_amt;
 uniform float drift_loc_amt;
 uniform float item_seed;
 
+uniform float layout_mode;   // 0 layered, 1 step-repeat
+uniform float step_index;    // this item's slot in step-repeat rotation
+uniform float step_count;    // total enabled items participating in step-repeat
+
 uniform float vignette_enabled;
 uniform float2 vignette_center;
 uniform float vignette_size_px;
@@ -132,7 +136,7 @@ float vignette_mask_calc(float2 px)
 	return saturate(a);
 }
 
-float2 cell_local_at(float2 frag_px, int dcol, int drow)
+float2 cell_local_at(float2 frag_px, int dcol, int drow, out float2 cell_id)
 {
 	float cs = max(cell_size, 1.0);
 	float2 pos = frag_px - anchor;
@@ -150,7 +154,10 @@ float2 cell_local_at(float2 frag_px, int dcol, int drow)
 		float s = (hash11(float2(row, 7.0), item_seed) - 0.5) * 2.0 * drift_speed_amt;
 		col_shift *= (1.0 + s);
 	}
-	float m_along_shifted = m_along - col_shift;
+	float brick_shift = 0.0;
+	if (layout_mode > 0.5 && frac(row * 0.5) > 0.25)
+		brick_shift = cs * 0.5;
+	float m_along_shifted = m_along - col_shift - brick_shift;
 	float col = floor(m_along_shifted / cs + 0.5) + float(dcol);
 
 	float la = m_along_shifted - col * cs;
@@ -162,7 +169,18 @@ float2 cell_local_at(float2 frag_px, int dcol, int drow)
 		lp -= j.y;
 	}
 
+	cell_id = float2(col, row);
 	return float2(la, lp);
+}
+
+bool cell_belongs_to_this_item(float2 cell_id)
+{
+	if (layout_mode < 0.5)
+		return true;
+	float n = max(step_count, 1.0);
+	float raw = cell_id.x;
+	float rem = raw - floor(raw / n) * n;
+	return abs(rem - step_index) < 0.5;
 }
 
 // Number of neighbor cells (in each direction) whose shape can reach the
@@ -210,7 +228,10 @@ float4 PSShape(VertData v_in) : TARGET
 	float best_d = 1.0e6;
 	for (int dr = -reach; dr <= reach; ++dr) {
 		for (int dc = -reach; dc <= reach; ++dc) {
-			float2 p = cell_local_at(frag_px, dc, dr);
+			float2 cid;
+			float2 p = cell_local_at(frag_px, dc, dr, cid);
+			if (!cell_belongs_to_this_item(cid))
+				continue;
 			p = rotate2(p, shape_rotation);
 			float d = shape_sdf(p);
 			best_d = min(best_d, d);
@@ -238,7 +259,10 @@ float4 PSImage(VertData v_in) : TARGET
 	float found = 0.0;
 	for (int dr = -reach; dr <= reach; ++dr) {
 		for (int dc = -reach; dc <= reach; ++dc) {
-			float2 p = cell_local_at(frag_px, dc, dr);
+			float2 cid;
+			float2 p = cell_local_at(frag_px, dc, dr, cid);
+			if (!cell_belongs_to_this_item(cid))
+				continue;
 			p = rotate2(p, shape_rotation);
 			if (abs(p.x) <= half_size && abs(p.y) <= half_size) {
 				float d2 = dot(p, p);

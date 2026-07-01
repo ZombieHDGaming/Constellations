@@ -52,6 +52,8 @@ struct cpat_renderer {
 	uint32_t item_count;
 	struct cpat_item items[CONSTELLATIONS_MAX_ITEMS];
 
+	int layout_mode;
+
 	float motion_angle_deg;
 	float motion_speed;
 	bool alternating_lines;
