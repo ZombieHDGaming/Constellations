@@ -242,7 +242,11 @@ float4 PSShape(VertData v_in) : TARGET
 		// centered on the shape's edge. abs(d) is the distance to the outline.
 		best_d = abs(best_d) - max(stroke_thickness, 0.001) * shape_size * 0.5;
 	}
-	float edge = max(fwidth(best_d), 0.5);
+	// best_d is discontinuous where cell ownership changes (step-and-repeat)
+	// or across brick-shifted rows, so an unbounded fwidth() explodes there
+	// and smoothstep leaves ~50% alpha seams along cell borders. The SDFs are
+	// true pixel distances, so the real edge width never exceeds ~2 px.
+	float edge = clamp(fwidth(best_d), 0.5, 2.0);
 	float alpha = 1.0 - smoothstep(-edge, edge, best_d);
 	alpha *= vignette_mask_calc(frag_px);
 	return float4(shape_color.rgb, shape_color.a * alpha);
