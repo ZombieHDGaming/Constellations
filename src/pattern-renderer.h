@@ -50,6 +50,7 @@ struct cpat_renderer {
 	struct cpat_item items[CONSTELLATIONS_MAX_ITEMS];
 
 	int layout_mode;
+	int grid_order;
 
 	float motion_angle_deg;
 	float motion_speed;
@@ -58,6 +59,10 @@ struct cpat_renderer {
 	float speed_drift_amount;
 	bool location_drift;
 	float location_drift_amount;
+
+	bool twinkle_enabled;
+	float twinkle_amount;
+	float twinkle_speed;
 
 	bool vignette_enabled;
 	float vignette_size;
@@ -70,6 +75,7 @@ struct cpat_renderer {
 	bool vignette_inverted;
 
 	double phase;
+	double elapsed_time;
 
 	gs_effect_t *effect;
 };

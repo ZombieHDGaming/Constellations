@@ -133,6 +133,7 @@ void cpat_renderer_set_defaults(obs_data_t *settings, bool include_canvas)
 	obs_data_set_default_double(settings, "anchor_y_pct", 50.0);
 	obs_data_set_default_int(settings, "item_count", 1);
 	obs_data_set_default_int(settings, "layout_mode", CLAYOUT_LAYERED);
+	obs_data_set_default_int(settings, "grid_order", CGRID_RANDOM);
 
 	for (int i = 0; i < CONSTELLATIONS_MAX_ITEMS; ++i) {
 		char key[64];
@@ -159,6 +160,10 @@ void cpat_renderer_set_defaults(obs_data_t *settings, bool include_canvas)
 	obs_data_set_default_double(settings, "speed_drift_amount", 0.25);
 	obs_data_set_default_bool(settings, "location_drift", false);
 	obs_data_set_default_double(settings, "location_drift_amount", 0.15);
+
+	obs_data_set_default_bool(settings, "twinkle_enabled", false);
+	obs_data_set_default_double(settings, "twinkle_amount", 0.5);
+	obs_data_set_default_double(settings, "twinkle_speed", 1.0);
 
 	obs_data_set_default_bool(settings, "vignette_enabled", false);
 	obs_data_set_default_double(settings, "vignette_size", 0.7);
@@ -365,6 +370,24 @@ static bool layout_mode_modified(obs_properties_t *props, obs_property_t *p, obs
 {
 	UNUSED_PARAMETER(p);
 	apply_density_visibility(props, settings);
+	int mode = (int)obs_data_get_int(settings, "layout_mode");
+	obs_property_t *go = obs_properties_get(props, "grid_order");
+	if (go)
+		obs_property_set_visible(go, mode == CLAYOUT_GRID);
+	return true;
+}
+
+static bool twinkle_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(p);
+	bool en = obs_data_get_bool(settings, "twinkle_enabled");
+	obs_property_t *pp;
+	pp = obs_properties_get(props, "twinkle_amount");
+	if (pp)
+		obs_property_set_visible(pp, en);
+	pp = obs_properties_get(props, "twinkle_speed");
+	if (pp)
+		obs_property_set_visible(pp, en);
 	return true;
 }
 
@@ -500,6 +523,12 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 	obs_property_list_add_int(lm, obs_module_text("Constellations.Layout.Grid"), CLAYOUT_GRID);
 	obs_property_set_modified_callback(lm, layout_mode_modified);
 
+	obs_property_t *go = obs_properties_add_list(props, "grid_order",
+						     obs_module_text("Constellations.Layout.GridOrder"),
+						     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(go, obs_module_text("Constellations.Layout.GridOrder.Random"), CGRID_RANDOM);
+	obs_property_list_add_int(go, obs_module_text("Constellations.Layout.GridOrder.Ordered"), CGRID_ORDERED);
+
 	for (int i = 0; i < CONSTELLATIONS_MAX_ITEMS; ++i)
 		add_item_group(props, r, i);
 
@@ -521,6 +550,17 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 					obs_module_text("Constellations.Motion.LocationDriftAmount"), 0.0, 1.0, 0.01);
 	obs_properties_add_group(props, "motion_group", obs_module_text("Constellations.Group.Motion"),
 				 OBS_GROUP_NORMAL, motion);
+
+	obs_properties_t *tw = obs_properties_create();
+	obs_property_t *te =
+		obs_properties_add_bool(tw, "twinkle_enabled", obs_module_text("Constellations.Twinkle.Enabled"));
+	obs_property_set_modified_callback(te, twinkle_modified);
+	obs_properties_add_float_slider(tw, "twinkle_amount", obs_module_text("Constellations.Twinkle.Amount"), 0.0,
+					1.0, 0.01);
+	obs_properties_add_float_slider(tw, "twinkle_speed", obs_module_text("Constellations.Twinkle.Speed"), 0.05, 5.0,
+					0.05);
+	obs_properties_add_group(props, "twinkle_group", obs_module_text("Constellations.Group.Twinkle"),
+				 OBS_GROUP_NORMAL, tw);
 
 	obs_properties_t *vg = obs_properties_create();
 	obs_property_t *ve =
@@ -626,6 +666,7 @@ void cpat_renderer_update(struct cpat_renderer *r, obs_data_t *settings, bool in
 	r->item_count = (uint32_t)ic;
 
 	r->layout_mode = (int)obs_data_get_int(settings, "layout_mode");
+	r->grid_order = (int)obs_data_get_int(settings, "grid_order");
 
 	for (int i = 0; i < CONSTELLATIONS_MAX_ITEMS; ++i)
 		cpat_item_update(&r->items[i], settings, i, r->owner);
@@ -637,6 +678,10 @@ void cpat_renderer_update(struct cpat_renderer *r, obs_data_t *settings, bool in
 	r->speed_drift_amount = (float)obs_data_get_double(settings, "speed_drift_amount");
 	r->location_drift = obs_data_get_bool(settings, "location_drift");
 	r->location_drift_amount = (float)obs_data_get_double(settings, "location_drift_amount");
+
+	r->twinkle_enabled = obs_data_get_bool(settings, "twinkle_enabled");
+	r->twinkle_amount = (float)obs_data_get_double(settings, "twinkle_amount");
+	r->twinkle_speed = (float)obs_data_get_double(settings, "twinkle_speed");
 
 	r->vignette_enabled = obs_data_get_bool(settings, "vignette_enabled");
 	r->vignette_size = (float)obs_data_get_double(settings, "vignette_size");
@@ -652,6 +697,7 @@ void cpat_renderer_update(struct cpat_renderer *r, obs_data_t *settings, bool in
 void cpat_renderer_tick(struct cpat_renderer *r, float seconds)
 {
 	r->phase += (double)r->motion_speed * (double)seconds;
+	r->elapsed_time += (double)seconds;
 
 	uint32_t count = r->item_count;
 	if (count > CONSTELLATIONS_MAX_ITEMS)
@@ -790,10 +836,23 @@ static void set_common_uniforms(struct cpat_renderer *r, struct cpat_item *it, u
 	p = gs_effect_get_param_by_name(r->effect, "item_seed");
 	if (p)
 		gs_effect_set_float(p, (float)index * 17.31f);
+	p = gs_effect_get_param_by_name(r->effect, "elapsed_time");
+	if (p)
+		gs_effect_set_float(p, (float)r->elapsed_time);
+
+	p = gs_effect_get_param_by_name(r->effect, "twinkle_amount");
+	if (p)
+		gs_effect_set_float(p, r->twinkle_enabled ? r->twinkle_amount : 0.0f);
+	p = gs_effect_get_param_by_name(r->effect, "twinkle_speed");
+	if (p)
+		gs_effect_set_float(p, r->twinkle_speed);
 
 	p = gs_effect_get_param_by_name(r->effect, "layout_mode");
 	if (p)
 		gs_effect_set_float(p, (float)r->layout_mode);
+	p = gs_effect_get_param_by_name(r->effect, "grid_random");
+	if (p)
+		gs_effect_set_float(p, (r->grid_order == CGRID_ORDERED) ? 0.0f : 1.0f);
 	p = gs_effect_get_param_by_name(r->effect, "step_index");
 	if (p)
 		gs_effect_set_float(p, (float)step_index);
