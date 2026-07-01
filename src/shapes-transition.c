@@ -591,6 +591,8 @@ static obs_properties_t *cshape_properties(void *data)
 	obs_property_list_add_int(p, obs_module_text("Constellations.Transition.Mode.Dissolve"), CTRANS_MODE_DISSOLVE);
 	obs_property_list_add_int(p, obs_module_text("Constellations.Transition.Mode.ShapeZoom"),
 				  CTRANS_MODE_SHAPE_ZOOM);
+	obs_property_list_add_int(p, obs_module_text("Constellations.Transition.Mode.Keyhole"),
+				  CTRANS_MODE_KEYHOLE);
 	obs_property_set_modified_callback(p, prop_mode_changed);
 
 	p = obs_properties_add_list(props, "transition_type", obs_module_text("Constellations.Transition.Type"),

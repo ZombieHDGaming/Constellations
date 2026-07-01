@@ -226,6 +226,40 @@ float4 PSDraw(VertData v_in) : TARGET
 		return out_col;
 	}
 
+	if (transition_mode == 3) {
+		// Keyhole reveal: each cell's shape grows and b is only seen through
+		// the shape silhouette. Near the end of the cell's activation the
+		// shape overshoots the cell so any remaining a is covered.
+		float k_soft = 0.3;
+		float k_prog = progress * (1.0 + k_soft * 2.0) - k_soft;
+		float t = saturate((k_prog - d_wave) * 8.0 + 0.5 - jitter);
+
+		float natural_r = max(half_shape, 1.0);
+		float reveal_r = cs * ((tiling_mode == 1) ? 0.65 : 0.9);
+		float grow1 = saturate(t / 0.7);
+		float grow2 = saturate((t - 0.7) / 0.3);
+		float r = max(lerp(natural_r * grow1, reveal_r, grow2), 0.5);
+
+		float d = shape_sdf(local, r);
+		float edge = max(fwidth(d), 0.75);
+		float shape_mask = 1.0 - smoothstep(-edge, edge, d);
+
+		float4 base = a;
+		if (gap_distance > 0.001) {
+			float gd = cell_gap_sdf(local, natural_r, tiling_mode);
+			float edge2 = max(fwidth(gd), 0.75);
+			float gmask = 1.0 - smoothstep(-edge2, edge2, gd);
+			float gap_alpha = (1.0 - gmask) * gap_color.a * t * (1.0 - grow2);
+			base = lerp(base, gap_color, gap_alpha);
+		}
+		base = lerp(base, b, shape_mask);
+		// Backup fill so shapes that don't fully cover the cell (e.g. cross)
+		// still complete the reveal by progress=1.
+		float fill_alpha = saturate((t - 0.9) * 10.0);
+		base = lerp(base, b, fill_alpha);
+		return base;
+	}
+
 	// Extend each phase's range beyond [0,1] so the soft wave (+0.5 bias)
 	// still fully saturates to 0 at the start and 1 at the end for every
 	// d_wave / jitter. Without this, cells at d_wave=1 with jitter=0 end at

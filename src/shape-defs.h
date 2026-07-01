@@ -37,6 +37,7 @@ enum constellations_transition_mode {
 	CTRANS_MODE_COVER = 0,
 	CTRANS_MODE_DISSOLVE = 1,
 	CTRANS_MODE_SHAPE_ZOOM = 2,
+	CTRANS_MODE_KEYHOLE = 3,
 };
 
 enum constellations_transition_type {
