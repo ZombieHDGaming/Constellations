@@ -40,6 +40,7 @@ target_sources(
     src/plugin-main.c
     src/pattern-renderer.c
     src/pattern-source.c
+    src/topography-source.c
     src/pattern-filter.c
     src/shapes-transition.c
 )

@@ -1,0 +1,142 @@
+// Constellations - Topography contour lines effect
+// (c) 2026 Eion Dailey - GPLv2+
+
+uniform float4x4 ViewProj;
+
+uniform float2 canvas_size;
+uniform float noise_seed;
+uniform float zoom_amount;    // > 0; higher values zoom in on the map
+uniform float smoothness;     // 0 = angular lattice edges, 1 = fully smoothed
+uniform float2 drift_offset;  // accumulated map-space slide (Location Drift)
+uniform float contour_levels; // contour line count across the full height range
+
+uniform float line_half_px;
+uniform float4 line_color;
+
+uniform float glow_enabled;
+uniform float glow_size_px;
+uniform float glow_level; // pulse-modulated intensity, 1 when pulse is off
+uniform float4 glow_color;
+
+uniform float grid_enabled;
+uniform float grid_follow; // 1 = grid pans/zooms with the terrain, 0 = screen-fixed
+uniform float grid_size_px;
+uniform float grid_line_half_px;
+uniform float4 grid_color;
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData v_out;
+	v_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	v_out.uv  = v_in.uv;
+	return v_out;
+}
+
+float thash(float2 p)
+{
+	return frac(sin(dot(p, float2(127.1, 311.7)) + noise_seed * 269.5) * 43758.5453);
+}
+
+float vnoise(float2 p)
+{
+	float2 i = floor(p);
+	float2 f = frac(p);
+	// Blend between linear and quintic lattice interpolation: low smoothness
+	// keeps derivative breaks at cell borders, so the contour lines pick up
+	// sharp angles instead of rounded curves.
+	float2 q = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+	float2 u = lerp(f, q, saturate(smoothness));
+	float a = thash(i);
+	float b = thash(i + float2(1.0, 0.0));
+	float c = thash(i + float2(0.0, 1.0));
+	float d = thash(i + float2(1.0, 1.0));
+	return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+}
+
+float height_at(float2 p)
+{
+	float v = 0.0;
+	float amp = 0.5;
+	float2 q = p;
+	for (int i = 0; i < 5; i++) {
+		v += amp * vnoise(q);
+		// Rotate-and-scale between octaves so ridges don't align with axes.
+		q = float2(q.x * 1.6 - q.y * 1.2, q.x * 1.2 + q.y * 1.6) + 31.4;
+		amp *= 0.5;
+	}
+	return v;
+}
+
+float4 blend_over(float4 dst, float4 src)
+{
+	float a = src.a + dst.a * (1.0 - src.a);
+	if (a < 1.0e-5)
+		return float4(0.0, 0.0, 0.0, 0.0);
+	float3 rgb = (src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / a;
+	return float4(rgb, a);
+}
+
+float4 PSTopo(VertData v_in) : TARGET
+{
+	float2 frag_px = v_in.uv * canvas_size;
+	float z = max(zoom_amount, 0.01);
+	// Map space: one noise cell spans 100 px at zoom 1. Zoom scales around
+	// the source center so it reads like a camera moving over a fixed map.
+	float2 world = (frag_px - canvas_size * 0.5) / (100.0 * z) + drift_offset;
+
+	float f = height_at(world) * contour_levels;
+	// fwidth() converts level-space distance to true pixel distance, keeping
+	// line thickness constant regardless of terrain steepness or zoom.
+	float grad = max(fwidth(f), 1.0e-4);
+	float px_dist = abs(frac(f + 0.5) - 0.5) / grad;
+
+	float4 outc = float4(0.0, 0.0, 0.0, 0.0);
+
+	if (grid_enabled > 0.5) {
+		float gd_px;
+		if (grid_follow > 0.5) {
+			// Map-space grid: pans with Location Drift and scales with
+			// zoom, staying registered to the terrain. Grid Size is the
+			// on-screen cell size at 1x zoom; with no drift the center
+			// lines still cross at the source midpoint. Distances convert
+			// back to pixels so line thickness stays constant on screen.
+			float gs_world = max(grid_size_px, 4.0) / 100.0;
+			float2 gd = abs(frac(world / gs_world + 0.5) - 0.5) * gs_world * 100.0 * z;
+			gd_px = min(gd.x, gd.y);
+		} else {
+			// Screen-fixed grid: a static HUD-style overlay centered on
+			// the source midpoint while the terrain moves beneath it.
+			float gs = max(grid_size_px, 4.0);
+			float2 gp = frag_px - canvas_size * 0.5;
+			float2 gd = abs(frac(gp / gs + 0.5) - 0.5) * gs;
+			gd_px = min(gd.x, gd.y);
+		}
+		float gline = 1.0 - smoothstep(grid_line_half_px - 0.75, grid_line_half_px + 0.75, gd_px);
+		outc = float4(grid_color.rgb, grid_color.a * gline);
+	}
+
+	if (glow_enabled > 0.5) {
+		float t = saturate((px_dist - line_half_px) / max(glow_size_px, 0.5));
+		float ga = (1.0 - t) * (1.0 - t) * glow_color.a * glow_level;
+		outc = blend_over(outc, float4(glow_color.rgb, ga));
+	}
+
+	float la = (1.0 - smoothstep(line_half_px - 0.75, line_half_px + 0.75, px_dist)) * line_color.a;
+	outc = blend_over(outc, float4(line_color.rgb, la));
+
+	return outc;
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSTopo(v_in);
+	}
+}

@@ -82,5 +82,6 @@ enum constellations_tiling_mode {
 #define CONSTELLATIONS_MAX_ITEMS 32
 
 void constellations_register_pattern_source(void);
+void constellations_register_topography_source(void);
 void constellations_register_pattern_filter(void);
 void constellations_register_shapes_transition(void);
