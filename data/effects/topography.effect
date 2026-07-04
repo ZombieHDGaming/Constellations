@@ -97,9 +97,13 @@ float4 PSTopo(VertData v_in) : TARGET
 	float4 outc = float4(0.0, 0.0, 0.0, 0.0);
 
 	if (grid_enabled > 0.5) {
-		float gs = max(grid_size_px, 4.0);
-		float2 gp = frag_px - canvas_size * 0.5;
-		float2 gd = abs(frac(gp / gs + 0.5) - 0.5) * gs;
+		// The grid lives in map space so it pans with Location Drift and
+		// scales with zoom, staying registered to the terrain. Grid Size is
+		// the on-screen cell size at 1x zoom; with no drift the center lines
+		// still cross at the source midpoint. Distances convert back to
+		// pixels so line thickness stays constant on screen.
+		float gs_world = max(grid_size_px, 4.0) / 100.0;
+		float2 gd = abs(frac(world / gs_world + 0.5) - 0.5) * gs_world * 100.0 * z;
 		float gline = 1.0 - smoothstep(grid_line_half_px - 0.75, grid_line_half_px + 0.75, min(gd.x, gd.y));
 		outc = float4(grid_color.rgb, grid_color.a * gline);
 	}
