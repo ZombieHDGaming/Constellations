@@ -45,6 +45,7 @@ struct ctopo_source {
 	bool grid;
 	struct vec4 grid_color;
 	float grid_size;
+	float grid_line_size;
 
 	/* Accumulated map-space slide; integrating each tick means speed and
 	 * angle changes steer the drift instead of teleporting the terrain. */
@@ -96,6 +97,9 @@ static void ctopo_update(void *data, obs_data_t *settings)
 	s->grid = obs_data_get_bool(settings, "grid_backdrop");
 	vec4_from_rgba(&s->grid_color, (uint32_t)obs_data_get_int(settings, "grid_color"));
 	s->grid_size = (float)obs_data_get_double(settings, "grid_size");
+	s->grid_line_size = (float)obs_data_get_double(settings, "grid_line_size");
+	if (s->grid_line_size < 0.5f)
+		s->grid_line_size = 0.5f;
 }
 
 static void *ctopo_create(obs_data_t *settings, obs_source_t *source)
@@ -210,6 +214,9 @@ static void ctopo_render(void *data, gs_effect_t *effect)
 	p = gs_effect_get_param_by_name(s->effect, "grid_size_px");
 	if (p)
 		gs_effect_set_float(p, s->grid_size);
+	p = gs_effect_get_param_by_name(s->effect, "grid_line_half_px");
+	if (p)
+		gs_effect_set_float(p, s->grid_line_size * 0.5f);
 	p = gs_effect_get_param_by_name(s->effect, "grid_color");
 	if (p)
 		gs_effect_set_vec4(p, &s->grid_color);
@@ -279,6 +286,9 @@ static bool ctopo_grid_modified(obs_properties_t *props, obs_property_t *p, obs_
 	pp = obs_properties_get(props, "grid_size");
 	if (pp)
 		obs_property_set_visible(pp, grid);
+	pp = obs_properties_get(props, "grid_line_size");
+	if (pp)
+		obs_property_set_visible(pp, grid);
 	return true;
 }
 
@@ -332,6 +342,8 @@ static obs_properties_t *ctopo_props(void *data)
 	obs_properties_add_color_alpha(grid, "grid_color", obs_module_text("Constellations.Topo.GridColor"));
 	obs_properties_add_float_slider(grid, "grid_size", obs_module_text("Constellations.Topo.GridSize"), 10.0, 500.0,
 					1.0);
+	obs_properties_add_float_slider(grid, "grid_line_size", obs_module_text("Constellations.Topo.GridLineSize"),
+					0.5, 20.0, 0.1);
 	obs_properties_add_group(props, "grid_group", obs_module_text("Constellations.Topo.Group.Grid"),
 				 OBS_GROUP_NORMAL, grid);
 
@@ -358,6 +370,7 @@ static void ctopo_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, "grid_backdrop", false);
 	obs_data_set_default_int(settings, "grid_color", 0x64808080);
 	obs_data_set_default_double(settings, "grid_size", 100.0);
+	obs_data_set_default_double(settings, "grid_line_size", 1.0);
 }
 
 static struct obs_source_info ctopo_source_info = {
