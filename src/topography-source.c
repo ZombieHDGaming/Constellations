@@ -43,6 +43,7 @@ struct ctopo_source {
 	float zoom;
 
 	bool grid;
+	bool grid_follow;
 	struct vec4 grid_color;
 	float grid_size;
 	float grid_line_size;
@@ -95,6 +96,7 @@ static void ctopo_update(void *data, obs_data_t *settings)
 		s->zoom = 0.05f;
 
 	s->grid = obs_data_get_bool(settings, "grid_backdrop");
+	s->grid_follow = obs_data_get_bool(settings, "grid_follow");
 	vec4_from_rgba(&s->grid_color, (uint32_t)obs_data_get_int(settings, "grid_color"));
 	s->grid_size = (float)obs_data_get_double(settings, "grid_size");
 	s->grid_line_size = (float)obs_data_get_double(settings, "grid_line_size");
@@ -211,6 +213,9 @@ static void ctopo_render(void *data, gs_effect_t *effect)
 	p = gs_effect_get_param_by_name(s->effect, "grid_enabled");
 	if (p)
 		gs_effect_set_float(p, s->grid ? 1.0f : 0.0f);
+	p = gs_effect_get_param_by_name(s->effect, "grid_follow");
+	if (p)
+		gs_effect_set_float(p, s->grid_follow ? 1.0f : 0.0f);
 	p = gs_effect_get_param_by_name(s->effect, "grid_size_px");
 	if (p)
 		gs_effect_set_float(p, s->grid_size);
@@ -280,6 +285,9 @@ static bool ctopo_grid_modified(obs_properties_t *props, obs_property_t *p, obs_
 	UNUSED_PARAMETER(p);
 	bool grid = obs_data_get_bool(settings, "grid_backdrop");
 	obs_property_t *pp;
+	pp = obs_properties_get(props, "grid_follow");
+	if (pp)
+		obs_property_set_visible(pp, grid);
 	pp = obs_properties_get(props, "grid_color");
 	if (pp)
 		obs_property_set_visible(pp, grid);
@@ -339,6 +347,7 @@ static obs_properties_t *ctopo_props(void *data)
 	obs_property_t *ge =
 		obs_properties_add_bool(grid, "grid_backdrop", obs_module_text("Constellations.Topo.GridEnabled"));
 	obs_property_set_modified_callback(ge, ctopo_grid_modified);
+	obs_properties_add_bool(grid, "grid_follow", obs_module_text("Constellations.Topo.GridFollow"));
 	obs_properties_add_color_alpha(grid, "grid_color", obs_module_text("Constellations.Topo.GridColor"));
 	obs_properties_add_float_slider(grid, "grid_size", obs_module_text("Constellations.Topo.GridSize"), 10.0, 500.0,
 					1.0);
@@ -368,6 +377,7 @@ static void ctopo_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, "glow_pulse", false);
 	obs_data_set_default_double(settings, "glow_pulse_speed", 0.5);
 	obs_data_set_default_bool(settings, "grid_backdrop", false);
+	obs_data_set_default_bool(settings, "grid_follow", true);
 	obs_data_set_default_int(settings, "grid_color", 0x64808080);
 	obs_data_set_default_double(settings, "grid_size", 100.0);
 	obs_data_set_default_double(settings, "grid_line_size", 1.0);
