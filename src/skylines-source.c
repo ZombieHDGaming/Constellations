@@ -21,7 +21,10 @@ struct csky_source {
 	int seed;
 
 	float height_variation;
+	float min_height;
 	float width_variation;
+	float min_width;
+	float shade_variation;
 	float window_occupancy;
 	struct vec4 building_color;
 	struct vec4 window_on_color;
@@ -39,6 +42,13 @@ struct csky_source {
 	double twinkle_phase;
 
 	gs_effect_t *effect;
+
+	/* A static skyline (no drift, no twinkle) is rendered once into this
+	 * cache and blitted afterwards, instead of re-evaluating the
+	 * procedural shader for every pixel every frame. */
+	gs_texrender_t *cache;
+	bool cache_valid;
+	uint32_t cache_w, cache_h;
 };
 
 static const char *csky_source_get_name(void *unused)
@@ -69,7 +79,10 @@ static void csky_update(void *data, obs_data_t *settings)
 	s->seed = (int)obs_data_get_int(settings, "seed");
 
 	s->height_variation = (float)obs_data_get_double(settings, "height_variation");
+	s->min_height = (float)obs_data_get_double(settings, "min_height");
 	s->width_variation = (float)obs_data_get_double(settings, "width_variation");
+	s->min_width = (float)obs_data_get_double(settings, "min_width");
+	s->shade_variation = (float)obs_data_get_double(settings, "shade_variation");
 	s->window_occupancy = (float)obs_data_get_double(settings, "window_occupancy");
 	vec4_from_rgba(&s->building_color, (uint32_t)obs_data_get_int(settings, "building_color"));
 	vec4_from_rgba(&s->window_on_color, (uint32_t)obs_data_get_int(settings, "window_on_color"));
@@ -82,6 +95,8 @@ static void csky_update(void *data, obs_data_t *settings)
 	s->twinkle_speed = (float)obs_data_get_double(settings, "twinkle_speed");
 	if (s->twinkle_speed < 0.0f)
 		s->twinkle_speed = 0.0f;
+
+	s->cache_valid = false;
 }
 
 static void *csky_create_common(obs_data_t *settings, obs_source_t *source, bool is_filter)
@@ -95,6 +110,7 @@ static void *csky_create_common(obs_data_t *settings, obs_source_t *source, bool
 		obs_enter_graphics();
 		char *errors = NULL;
 		s->effect = gs_effect_create_from_file(path, &errors);
+		s->cache = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 		obs_leave_graphics();
 		if (!s->effect)
 			obs_log(LOG_ERROR, "Constellations: failed to compile skylines.effect: %s",
@@ -122,9 +138,12 @@ static void *csky_filter_create(obs_data_t *settings, obs_source_t *source)
 static void csky_destroy(void *data)
 {
 	struct csky_source *s = data;
-	if (s->effect) {
+	if (s->effect || s->cache) {
 		obs_enter_graphics();
-		gs_effect_destroy(s->effect);
+		if (s->effect)
+			gs_effect_destroy(s->effect);
+		if (s->cache)
+			gs_texrender_destroy(s->cache);
 		obs_leave_graphics();
 	}
 	bfree(s);
@@ -163,9 +182,18 @@ static void csky_draw(struct csky_source *s, uint32_t width, uint32_t height)
 	p = gs_effect_get_param_by_name(s->effect, "height_variation");
 	if (p)
 		gs_effect_set_float(p, s->height_variation);
+	p = gs_effect_get_param_by_name(s->effect, "min_height");
+	if (p)
+		gs_effect_set_float(p, s->min_height);
 	p = gs_effect_get_param_by_name(s->effect, "width_variation");
 	if (p)
 		gs_effect_set_float(p, s->width_variation);
+	p = gs_effect_get_param_by_name(s->effect, "min_width");
+	if (p)
+		gs_effect_set_float(p, s->min_width);
+	p = gs_effect_get_param_by_name(s->effect, "shade_variation");
+	if (p)
+		gs_effect_set_float(p, s->shade_variation);
 	p = gs_effect_get_param_by_name(s->effect, "window_occupancy");
 	if (p)
 		gs_effect_set_float(p, s->window_occupancy);
@@ -192,11 +220,62 @@ static void csky_draw(struct csky_source *s, uint32_t width, uint32_t height)
 	gs_blend_state_pop();
 }
 
+static void csky_render_cached(struct csky_source *s, uint32_t width, uint32_t height)
+{
+	bool animated = (s->drift && s->drift_speed != 0.0f) || (s->twinkle && s->twinkle_speed > 0.0f);
+	if (animated || !s->cache) {
+		csky_draw(s, width, height);
+		s->cache_valid = false;
+		return;
+	}
+
+	if (!s->cache_valid || s->cache_w != width || s->cache_h != height) {
+		gs_texrender_reset(s->cache);
+		if (!gs_texrender_begin(s->cache, width, height)) {
+			csky_draw(s, width, height);
+			return;
+		}
+		/* Store raw shader output; the blit re-emits the same values
+		 * under the caller's framebuffer state, so the cached path
+		 * matches the direct draw exactly. */
+		bool prev_srgb = gs_framebuffer_srgb_enabled();
+		gs_enable_framebuffer_srgb(false);
+		struct vec4 clear;
+		vec4_zero(&clear);
+		gs_clear(GS_CLEAR_COLOR, &clear, 0.0f, 0);
+		gs_ortho(0.0f, (float)width, 0.0f, (float)height, -100.0f, 100.0f);
+		csky_draw(s, width, height);
+		gs_enable_framebuffer_srgb(prev_srgb);
+		gs_texrender_end(s->cache);
+		s->cache_valid = true;
+		s->cache_w = width;
+		s->cache_h = height;
+	}
+
+	gs_texture_t *tex = gs_texrender_get_texture(s->cache);
+	if (!tex) {
+		csky_draw(s, width, height);
+		return;
+	}
+
+	/* The cache was composited onto transparent black, so its content is
+	 * premultiplied; blit with the matching blend mode. */
+	gs_effect_t *def = obs_get_base_effect(OBS_EFFECT_DEFAULT);
+	gs_eparam_t *img = gs_effect_get_param_by_name(def, "image");
+	if (img)
+		gs_effect_set_texture(img, tex);
+	gs_blend_state_push();
+	gs_blend_function(GS_BLEND_ONE, GS_BLEND_INVSRCALPHA);
+	while (gs_effect_loop(def, "Draw"))
+		gs_draw_sprite(tex, 0, width, height);
+	gs_blend_state_pop();
+}
+
 static void csky_source_render(void *data, gs_effect_t *effect)
 {
 	UNUSED_PARAMETER(effect);
 	struct csky_source *s = data;
-	csky_draw(s, s->width, s->height);
+	csky_render_cached(s, s->width, s->height);
 }
 
 static void csky_filter_render(void *data, gs_effect_t *effect)
@@ -216,7 +295,7 @@ static void csky_filter_render(void *data, gs_effect_t *effect)
 		return;
 	obs_source_process_filter_end(s->self, obs_get_base_effect(OBS_EFFECT_DEFAULT), w, h);
 
-	csky_draw(s, w, h);
+	csky_render_cached(s, w, h);
 }
 
 static uint32_t csky_width(void *data)
@@ -267,10 +346,16 @@ static obs_properties_t *csky_props_common(bool is_filter)
 	obs_properties_add_int_slider(buildings, "seed", obs_module_text("Constellations.Skyline.Seed"), 0, 10000, 1);
 	obs_properties_add_float_slider(buildings, "height_variation",
 					obs_module_text("Constellations.Skyline.HeightVariation"), 0.0, 1.0, 0.01);
+	obs_properties_add_float_slider(buildings, "min_height", obs_module_text("Constellations.Skyline.MinHeight"),
+					0.0, 0.95, 0.01);
 	obs_properties_add_float_slider(buildings, "width_variation",
 					obs_module_text("Constellations.Skyline.WidthVariation"), 0.0, 1.0, 0.01);
+	obs_properties_add_float_slider(buildings, "min_width", obs_module_text("Constellations.Skyline.MinWidth"), 0.1,
+					1.0, 0.01);
 	obs_properties_add_color_alpha(buildings, "building_color",
 				       obs_module_text("Constellations.Skyline.BuildingColor"));
+	obs_properties_add_float_slider(buildings, "shade_variation",
+					obs_module_text("Constellations.Skyline.ShadeVariation"), 0.0, 1.0, 0.01);
 	obs_properties_add_group(props, "buildings_group", obs_module_text("Constellations.Skyline.Group.Buildings"),
 				 OBS_GROUP_NORMAL, buildings);
 
@@ -317,7 +402,10 @@ static void csky_defaults_common(obs_data_t *settings)
 {
 	obs_data_set_default_int(settings, "seed", 1234);
 	obs_data_set_default_double(settings, "height_variation", 0.5);
+	obs_data_set_default_double(settings, "min_height", 0.0);
 	obs_data_set_default_double(settings, "width_variation", 0.65);
+	obs_data_set_default_double(settings, "min_width", 0.1);
+	obs_data_set_default_double(settings, "shade_variation", 0.2);
 	obs_data_set_default_double(settings, "window_occupancy", 0.5);
 	obs_data_set_default_int(settings, "building_color", 0xFF3A2A1E);
 	obs_data_set_default_int(settings, "window_on_color", 0xFF66D9FF);
