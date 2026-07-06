@@ -41,6 +41,7 @@ target_sources(
     src/pattern-renderer.c
     src/pattern-source.c
     src/topography-source.c
+    src/skylines-source.c
     src/pattern-filter.c
     src/shapes-transition.c
 )
