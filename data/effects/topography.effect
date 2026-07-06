@@ -90,10 +90,21 @@ float4 PSTopo(VertData v_in) : TARGET
 	float2 world = (frag_px - canvas_size * 0.5) / (100.0 * z) + drift_offset;
 
 	float f = height_at(world) * contour_levels;
-	// fwidth() converts level-space distance to true pixel distance, keeping
-	// line thickness constant regardless of terrain steepness or zoom.
-	float grad = max(fwidth(f), 1.0e-4);
-	float px_dist = abs(frac(f + 0.5) - 0.5) / grad;
+	// Screen-space distance to the nearest contour. The isotropic gradient
+	// (length of the derivative pair) keeps thickness even on diagonals
+	// where fwidth() overestimates, and the second-order term keeps the
+	// estimate honest where the field grazes a level without crossing it
+	// (peaks, pits, saddles) — a first-order df/grad collapses there and
+	// used to render jagged, double-width blobs.
+	float df = abs(frac(f + 0.5) - 0.5);
+	float grad = max(length(float2(ddx(f), ddy(f))), 1.0e-5);
+	float curv = max(fwidth(grad), 1.0e-6);
+	float px_dist = 2.0 * df / (grad + sqrt(grad * grad + 2.0 * curv * df));
+
+	// A contour ring shrinking toward a summit ends as a sub-pixel speck
+	// that flickers during drift; fade features smaller than the gradient
+	// can resolve instead of drawing them.
+	float speck_fade = smoothstep(0.0, 1.0, grad / curv);
 
 	float4 outc = float4(0.0, 0.0, 0.0, 0.0);
 
@@ -122,11 +133,18 @@ float4 PSTopo(VertData v_in) : TARGET
 
 	if (glow_enabled > 0.5) {
 		float t = saturate((px_dist - line_half_px) / max(glow_size_px, 0.5));
-		float ga = (1.0 - t) * (1.0 - t) * glow_color.a * glow_level;
+		float ga = (1.0 - t) * (1.0 - t) * glow_color.a * glow_level * speck_fade;
 		outc = blend_over(outc, float4(glow_color.rgb, ga));
 	}
 
-	float la = (1.0 - smoothstep(line_half_px - 0.75, line_half_px + 0.75, px_dist)) * line_color.a;
+	// Where the terrain is steep enough that neighboring contours would
+	// overlap on screen, blend toward their average coverage instead of
+	// drawing aliased line mush.
+	float line_mask = 1.0 - smoothstep(line_half_px - 0.75, line_half_px + 0.75, px_dist);
+	float density = saturate(grad * (2.0 * line_half_px + 3.0));
+	float avg_cov = saturate(2.0 * line_half_px * grad);
+	line_mask = lerp(line_mask, avg_cov, density * density);
+	float la = line_mask * line_color.a * speck_fade;
 	outc = blend_over(outc, float4(line_color.rgb, la));
 
 	return outc;
