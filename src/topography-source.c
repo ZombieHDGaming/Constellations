@@ -22,6 +22,7 @@ the Free Software Foundation; either version 2 of the License, or
 
 struct ctopo_source {
 	obs_source_t *self;
+	bool is_filter;
 
 	uint32_t width, height;
 	int seed;
@@ -62,16 +63,24 @@ static const char *ctopo_get_name(void *unused)
 	return obs_module_text("Constellations.TopoSource.Name");
 }
 
+static const char *ctopo_filter_get_name(void *unused)
+{
+	UNUSED_PARAMETER(unused);
+	return obs_module_text("Constellations.TopoFilter.Name");
+}
+
 static void ctopo_update(void *data, obs_data_t *settings)
 {
 	struct ctopo_source *s = data;
 
-	s->width = (uint32_t)obs_data_get_int(settings, "width");
-	s->height = (uint32_t)obs_data_get_int(settings, "height");
-	if (s->width == 0)
-		s->width = 1920;
-	if (s->height == 0)
-		s->height = 1080;
+	if (!s->is_filter) {
+		s->width = (uint32_t)obs_data_get_int(settings, "width");
+		s->height = (uint32_t)obs_data_get_int(settings, "height");
+		if (s->width == 0)
+			s->width = 1920;
+		if (s->height == 0)
+			s->height = 1080;
+	}
 
 	s->seed = (int)obs_data_get_int(settings, "seed");
 
@@ -104,10 +113,11 @@ static void ctopo_update(void *data, obs_data_t *settings)
 		s->grid_line_size = 0.5f;
 }
 
-static void *ctopo_create(obs_data_t *settings, obs_source_t *source)
+static void *ctopo_create_common(obs_data_t *settings, obs_source_t *source, bool is_filter)
 {
 	struct ctopo_source *s = bzalloc(sizeof(*s));
 	s->self = source;
+	s->is_filter = is_filter;
 
 	char *path = obs_module_file("effects/topography.effect");
 	if (path) {
@@ -126,6 +136,16 @@ static void *ctopo_create(obs_data_t *settings, obs_source_t *source)
 
 	ctopo_update(s, settings);
 	return s;
+}
+
+static void *ctopo_create(obs_data_t *settings, obs_source_t *source)
+{
+	return ctopo_create_common(settings, source, false);
+}
+
+static void *ctopo_filter_create(obs_data_t *settings, obs_source_t *source)
+{
+	return ctopo_create_common(settings, source, true);
 }
 
 static void ctopo_destroy(void *data)
@@ -153,11 +173,9 @@ static void ctopo_tick(void *data, float seconds)
 	}
 }
 
-static void ctopo_render(void *data, gs_effect_t *effect)
+static void ctopo_draw(struct ctopo_source *s, uint32_t width, uint32_t height)
 {
-	UNUSED_PARAMETER(effect);
-	struct ctopo_source *s = data;
-	if (!s->effect || s->width == 0 || s->height == 0)
+	if (!s->effect || width == 0 || height == 0)
 		return;
 
 	float glow_level = 1.0f;
@@ -169,7 +187,7 @@ static void ctopo_render(void *data, gs_effect_t *effect)
 	gs_eparam_t *p;
 	struct vec2 v2;
 
-	vec2_set(&v2, (float)s->width, (float)s->height);
+	vec2_set(&v2, (float)width, (float)height);
 	p = gs_effect_get_param_by_name(s->effect, "canvas_size");
 	if (p)
 		gs_effect_set_vec2(p, &v2);
@@ -229,8 +247,35 @@ static void ctopo_render(void *data, gs_effect_t *effect)
 	gs_blend_state_push();
 	gs_blend_function(GS_BLEND_SRCALPHA, GS_BLEND_INVSRCALPHA);
 	while (gs_effect_loop(s->effect, "Draw"))
-		gs_draw_sprite(NULL, 0, s->width, s->height);
+		gs_draw_sprite(NULL, 0, width, height);
 	gs_blend_state_pop();
+}
+
+static void ctopo_render(void *data, gs_effect_t *effect)
+{
+	UNUSED_PARAMETER(effect);
+	struct ctopo_source *s = data;
+	ctopo_draw(s, s->width, s->height);
+}
+
+static void ctopo_filter_render(void *data, gs_effect_t *effect)
+{
+	UNUSED_PARAMETER(effect);
+	struct ctopo_source *s = data;
+
+	obs_source_t *target = obs_filter_get_target(s->self);
+	uint32_t w = target ? obs_source_get_base_width(target) : 0;
+	uint32_t h = target ? obs_source_get_base_height(target) : 0;
+	if (w == 0 || h == 0) {
+		obs_source_skip_video_filter(s->self);
+		return;
+	}
+
+	if (!obs_source_process_filter_begin(s->self, GS_RGBA, OBS_ALLOW_DIRECT_RENDERING))
+		return;
+	obs_source_process_filter_end(s->self, obs_get_base_effect(OBS_EFFECT_DEFAULT), w, h);
+
+	ctopo_draw(s, w, h);
 }
 
 static uint32_t ctopo_width(void *data)
@@ -300,16 +345,17 @@ static bool ctopo_grid_modified(obs_properties_t *props, obs_property_t *p, obs_
 	return true;
 }
 
-static obs_properties_t *ctopo_props(void *data)
+static obs_properties_t *ctopo_props_common(bool is_filter)
 {
-	UNUSED_PARAMETER(data);
 	obs_properties_t *props = obs_properties_create();
 
-	obs_properties_t *canvas = obs_properties_create();
-	obs_properties_add_int(canvas, "width", obs_module_text("Constellations.Canvas.Width"), 1, 8192, 1);
-	obs_properties_add_int(canvas, "height", obs_module_text("Constellations.Canvas.Height"), 1, 8192, 1);
-	obs_properties_add_group(props, "canvas_group", obs_module_text("Constellations.Group.Canvas"),
-				 OBS_GROUP_NORMAL, canvas);
+	if (!is_filter) {
+		obs_properties_t *canvas = obs_properties_create();
+		obs_properties_add_int(canvas, "width", obs_module_text("Constellations.Canvas.Width"), 1, 8192, 1);
+		obs_properties_add_int(canvas, "height", obs_module_text("Constellations.Canvas.Height"), 1, 8192, 1);
+		obs_properties_add_group(props, "canvas_group", obs_module_text("Constellations.Group.Canvas"),
+					 OBS_GROUP_NORMAL, canvas);
+	}
 
 	obs_properties_t *terrain = obs_properties_create();
 	obs_properties_add_int_slider(terrain, "seed", obs_module_text("Constellations.Topo.Seed"), 0, 10000, 1);
@@ -359,10 +405,20 @@ static obs_properties_t *ctopo_props(void *data)
 	return props;
 }
 
-static void ctopo_defaults(obs_data_t *settings)
+static obs_properties_t *ctopo_props(void *data)
 {
-	obs_data_set_default_int(settings, "width", 1920);
-	obs_data_set_default_int(settings, "height", 1080);
+	UNUSED_PARAMETER(data);
+	return ctopo_props_common(false);
+}
+
+static obs_properties_t *ctopo_filter_props(void *data)
+{
+	UNUSED_PARAMETER(data);
+	return ctopo_props_common(true);
+}
+
+static void ctopo_defaults_common(obs_data_t *settings)
+{
 	obs_data_set_default_int(settings, "seed", 1234);
 	obs_data_set_default_double(settings, "zoom", 1.0);
 	obs_data_set_default_double(settings, "smoothness", 1.0);
@@ -383,6 +439,13 @@ static void ctopo_defaults(obs_data_t *settings)
 	obs_data_set_default_double(settings, "grid_line_size", 1.0);
 }
 
+static void ctopo_defaults(obs_data_t *settings)
+{
+	obs_data_set_default_int(settings, "width", 1920);
+	obs_data_set_default_int(settings, "height", 1080);
+	ctopo_defaults_common(settings);
+}
+
 static struct obs_source_info ctopo_source_info = {
 	.id = "constellations_topography_source",
 	.type = OBS_SOURCE_TYPE_INPUT,
@@ -400,7 +463,26 @@ static struct obs_source_info ctopo_source_info = {
 	.get_defaults = ctopo_defaults,
 };
 
+static struct obs_source_info ctopo_filter_info = {
+	.id = "constellations_topography_filter",
+	.type = OBS_SOURCE_TYPE_FILTER,
+	.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_SRGB,
+	.get_name = ctopo_filter_get_name,
+	.create = ctopo_filter_create,
+	.destroy = ctopo_destroy,
+	.update = ctopo_update,
+	.video_tick = ctopo_tick,
+	.video_render = ctopo_filter_render,
+	.get_properties = ctopo_filter_props,
+	.get_defaults = ctopo_defaults_common,
+};
+
 void constellations_register_topography_source(void)
 {
 	obs_register_source(&ctopo_source_info);
+}
+
+void constellations_register_topography_filter(void)
+{
+	obs_register_source(&ctopo_filter_info);
 }

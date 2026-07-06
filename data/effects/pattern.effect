@@ -102,6 +102,42 @@ float sd_squircle(float2 p, float r)
 	return k - r;
 }
 
+float sd_star5(float2 p, float r)
+{
+	// Exact 5-point star, tip up (y is flipped for screen space). The inner
+	// vertices sit at 0.45 of the outer radius.
+	float2 k1 = float2(0.809016994, -0.587785252);
+	float2 k2 = float2(-k1.x, k1.y);
+	float rf = 0.45;
+	float2 q = float2(abs(p.x), -p.y);
+	q -= 2.0 * max(dot(k1, q), 0.0) * k1;
+	q -= 2.0 * max(dot(k2, q), 0.0) * k2;
+	q.x = abs(q.x);
+	q.y -= r;
+	float2 ba = rf * float2(-k1.y, k1.x) - float2(0.0, 1.0);
+	float h = clamp(dot(q, ba) / dot(ba, ba), 0.0, r);
+	return length(q - ba * h) * sign(q.y * ba.x - q.x * ba.y);
+}
+
+float dot2(float2 v)
+{
+	return dot(v, v);
+}
+
+float sd_heart(float2 p, float sz)
+{
+	// iq's unit heart spans y in [0..1] with the tip at the origin; flip y
+	// for screen space and shift so the shape is centered on the cell.
+	float s = max(sz, 1.0e-4) * 0.85;
+	float2 q = float2(abs(p.x), -p.y) / s + float2(0.0, 0.5);
+	float d;
+	if (q.y + q.x > 1.0)
+		d = sqrt(dot2(q - float2(0.25, 0.75))) - 0.35355339;
+	else
+		d = sqrt(min(dot2(q - float2(0.0, 1.0)), dot2(q - 0.5 * max(q.x + q.y, 0.0)))) * sign(q.x - q.y);
+	return d * s;
+}
+
 float hash11(float2 p, float seed)
 {
 	return frac(sin(dot(p + seed, float2(127.1, 311.7))) * 43758.5453);
@@ -248,6 +284,8 @@ float shape_sdf(float2 p)
 	if (shape_kind == 3) return sd_polygon(p, r, polygon_sides);
 	if (shape_kind == 4) return sd_squircle(p, r);
 	if (shape_kind == 5) return abs(p.y) - r;
+	if (shape_kind == 7) return sd_star5(p, r);
+	if (shape_kind == 8) return sd_heart(p, shape_size);
 	return abs(p.x) - r;
 }
 
