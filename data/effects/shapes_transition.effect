@@ -109,7 +109,9 @@ float sd_heart(float2 p, float sz)
 }
 float cell_gap_sdf(float2 p, float r, int tiling)
 {
-	if (tiling == 1) return sd_polygon(p, r, 6);
+	// Swap coords to reflect the hexagon's edge normals from 30+k*60 degrees
+	// onto k*60, matching the tight lattice's Voronoi cell orientation.
+	if (tiling == 1) return sd_polygon(float2(p.y, p.x), r, 6);
 	return sd_box(p, float2(r, r));
 }
 
@@ -207,11 +209,14 @@ float4 PSDraw(VertData v_in) : TARGET
 		float max_r = length(canvas_size) * 0.5 + length(canvas_size) * 0.5;
 		float scale = (zoom_dir == 0) ? progress : (1.0 - progress);
 		scale = saturate(scale);
-		float r = max(max_r * scale, 0.5);
+		float r_raw = max_r * scale;
+		float r = max(r_raw, 0.5);
 		float2 p = frag_px - anchor;
 		float d = shape_sdf(p, r);
 		float edge = max(fwidth(d), 1.0);
-		float mask = 1.0 - smoothstep(-edge, edge, d);
+		// Fade out as the intended radius goes sub-pixel; the SDF clamp
+		// plus the AA window otherwise leaves a speck when r_raw is 0.
+		float mask = (1.0 - smoothstep(-edge, edge, d)) * saturate(r_raw);
 		if (zoom_dir == 0) {
 			return lerp(a, b, mask);
 		}
@@ -225,6 +230,7 @@ float4 PSDraw(VertData v_in) : TARGET
 	float2 local;
 	float2 cell_center;
 	float half_shape;
+	float shape_fit;
 
 	if (tiling_mode == 1) {
 		float row_height = cs * 0.8660254; // sqrt(3)/2
@@ -254,11 +260,16 @@ float4 PSDraw(VertData v_in) : TARGET
 		cell_center = best_center + anchor;
 		local = frag_px - cell_center;
 		half_shape = max((cs * 0.5773503) - gap_half, 1.0); // 1/sqrt(3)
+		// Largest radius at which any shape stays inside its hex Voronoi
+		// cell; drawing at half_shape (the circumradius) gets clipped to the
+		// cell and every shape degenerates to the same round blob.
+		shape_fit = max((cs * 0.5) - gap_half, 1.0);
 	} else {
 		cell_xy = floor(pos / cs);
 		local = pos - cell_xy * cs - cs * 0.5;
 		cell_center = cell_xy * cs + cs * 0.5 + anchor;
 		half_shape = max((cs * 0.5) - gap_half, 1.0);
+		shape_fit = half_shape;
 	}
 
 	float d_wave = wavefront_d(cell_center);
@@ -277,14 +288,27 @@ float4 PSDraw(VertData v_in) : TARGET
 		} else if (dissolve_type == 2) {
 			fade = saturate(1.0 - p_local);
 		}
-		float r = max(half_shape * scale, 0.5);
+		float r_raw = shape_fit * scale;
+		float r = max(r_raw, 0.5);
 		float d = shape_sdf(local, r);
 		float edge = max(fwidth(d), 0.75);
-		float shape_mask = 1.0 - smoothstep(-edge, edge, d);
+		// saturate(r_raw) kills the sub-pixel speck each cell otherwise
+		// leaves at its center once the shape has fully shrunk.
+		float shape_mask = (1.0 - smoothstep(-edge, edge, d)) * saturate(r_raw);
 		if (dissolve_type == 0) {
-			float crop_half = half_shape * saturate(1.0 - p_local);
+			float crop_half = shape_fit * saturate(1.0 - p_local);
 			if (abs(local.x) > crop_half || abs(local.y) > crop_half) shape_mask = 0.0;
 		}
+
+		// Full-cell patch that keeps tex_b hidden until this cell starts
+		// dissolving; without it, any part of the cell the shape doesn't
+		// reach shows b as tiled holes for the whole transition. Extends a
+		// hair past the cell boundary so neighboring patches overlap
+		// instead of meeting in an AA seam.
+		float cd = cell_gap_sdf(local, half_shape, tiling_mode);
+		float cedge = max(fwidth(cd), 0.75);
+		float cell_mask = 1.0 - smoothstep(0.0, 2.0 * cedge, cd);
+		float residue = cell_mask * saturate(1.0 - p_local * 4.0);
 
 		float4 src;
 		if (use_source_texture > 0) {
@@ -305,7 +329,7 @@ float4 PSDraw(VertData v_in) : TARGET
 			float gap_alpha = (1.0 - gmask) * gap_color.a * fade;
 			out_col = lerp(out_col, gap_color, gap_alpha);
 		}
-		out_col = lerp(out_col, src, shape_mask * src.a);
+		out_col = lerp(out_col, src, max(shape_mask, residue) * src.a);
 		return out_col;
 	}
 
@@ -317,19 +341,22 @@ float4 PSDraw(VertData v_in) : TARGET
 		float k_prog = progress * (1.0 + k_soft * 2.0) - k_soft;
 		float t = saturate((k_prog - d_wave) * 8.0 + 0.5 - jitter);
 
-		float natural_r = max(half_shape, 1.0);
+		float natural_r = max(shape_fit, 1.0);
 		float reveal_r = cs * ((tiling_mode == 1) ? 0.65 : 0.9);
 		float grow1 = saturate(t / 0.7);
 		float grow2 = saturate((t - 0.7) / 0.3);
-		float r = max(lerp(natural_r * grow1, reveal_r, grow2), 0.5);
+		float r_raw = lerp(natural_r * grow1, reveal_r, grow2);
+		float r = max(r_raw, 0.5);
 
 		float d = shape_sdf(local, r);
 		float edge = max(fwidth(d), 0.75);
-		float shape_mask = 1.0 - smoothstep(-edge, edge, d);
+		// saturate(r_raw) keeps cells that haven't activated yet from
+		// leaking a sub-pixel dot of tex_b at their center.
+		float shape_mask = (1.0 - smoothstep(-edge, edge, d)) * saturate(r_raw);
 
 		float4 base = a;
 		if (gap_distance > 0.001) {
-			float gd = cell_gap_sdf(local, natural_r, tiling_mode);
+			float gd = cell_gap_sdf(local, half_shape, tiling_mode);
 			float edge2 = max(fwidth(gd), 0.75);
 			float gmask = 1.0 - smoothstep(-edge2, edge2, gd);
 			float gap_alpha = (1.0 - gmask) * gap_color.a * t * (1.0 - grow2);
@@ -353,7 +380,7 @@ float4 PSDraw(VertData v_in) : TARGET
 	float t1 = saturate((ph1 - d_wave) * 8.0 + 0.5 - jitter);
 	float t2 = saturate((ph2 - d_wave) * 8.0 + 0.5 - jitter);
 
-	float r = max(half_shape, 1.0);
+	float r = max(shape_fit, 1.0);
 	float d = shape_sdf(local, r);
 	float edge = max(fwidth(d), 0.75);
 	float shape_mask = 1.0 - smoothstep(-edge, edge, d);
