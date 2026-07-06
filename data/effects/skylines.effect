@@ -1,0 +1,126 @@
+// Constellations - City skyline flat-look effect
+// (c) 2026 Eion Dailey - GPLv2+
+
+uniform float4x4 ViewProj;
+
+uniform float2 canvas_size;
+uniform float noise_seed;
+uniform float drift_px;         // accumulated horizontal slide (Location Drift)
+uniform float height_variation; // 0 = uniform roofline, 1 = maximum randomness
+uniform float4 building_color;
+uniform float4 window_on_color;
+uniform float4 window_off_color;
+uniform float twinkle_active; // 1 only when Window Twinkle is on and speed > 0
+uniform float twinkle_phase;  // accumulated twinkle cycles
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData v_out;
+	v_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	v_out.uv  = v_in.uv;
+	return v_out;
+}
+
+float shash(float n)
+{
+	return frac(sin(n * 127.1 + noise_seed * 269.5) * 43758.5453);
+}
+
+float shash2(float2 p)
+{
+	return frac(sin(dot(p, float2(127.1, 311.7)) + noise_seed * 269.5) * 43758.5453);
+}
+
+float boundary(float i, float slot_w)
+{
+	// Jittered slot borders give adjacent buildings varied widths while
+	// keeping the skyline gap-free.
+	return (i + (shash(i) - 0.5) * 0.6) * slot_w;
+}
+
+float4 blend_over(float4 dst, float4 src)
+{
+	float a = src.a + dst.a * (1.0 - src.a);
+	if (a < 1.0e-5)
+		return float4(0.0, 0.0, 0.0, 0.0);
+	float3 rgb = (src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / a;
+	return float4(rgb, a);
+}
+
+float4 PSSkyline(VertData v_in) : TARGET
+{
+	float2 frag_px = v_in.uv * canvas_size;
+	float ch = canvas_size.y;
+	float slot_w = 0.085 * ch;
+	float x = frag_px.x + drift_px;
+	float yb = ch - frag_px.y; // height above the source's bottom edge
+
+	// Resolve which jittered slot this pixel falls in; the jitter never
+	// moves a border more than 0.3 slots, so only the neighbors can claim it.
+	float fi = floor(x / slot_w);
+	float bldg = fi;
+	if (x < boundary(fi, slot_w))
+		bldg = fi - 1.0;
+	else if (x >= boundary(fi + 1.0, slot_w))
+		bldg = fi + 1.0;
+	float left = boundary(bldg, slot_w);
+	float right = boundary(bldg + 1.0, slot_w);
+
+	// Roofline: an even 55% of the canvas at zero variation, spreading
+	// toward 15%..95% as Building Height Variation approaches 1.
+	float hr = frac(sin(bldg * 113.5 + noise_seed * 269.5 + 7.3) * 43758.5453);
+	float h_px = (0.55 + (hr - 0.5) * 0.8 * saturate(height_variation)) * ch;
+
+	float body_a = 1.0 - smoothstep(h_px - 0.75, h_px + 0.75, yb);
+	if (body_a <= 0.0)
+		return float4(0.0, 0.0, 0.0, 0.0);
+
+	// Subtle per-building shading keeps same-height neighbors readable
+	// without straying far from the chosen building color.
+	float shade = 0.9 + 0.2 * frac(sin(bldg * 91.7 + noise_seed * 269.5 + 3.1) * 43758.5453);
+	float4 outc = float4(building_color.rgb * shade, building_color.a);
+
+	// Window grid, scaled with the canvas and inset from every edge so no
+	// window is clipped by a roofline, a wall, or the ground.
+	float pitch = max(10.0, 0.024 * ch);
+	float side_inset = pitch * 0.5;
+	float top_inset = pitch * 0.7;
+	float bottom_inset = pitch * 0.45;
+	float2 wl = float2(x - left - side_inset, (h_px - yb) - top_inset);
+	float ncols = floor((right - left - side_inset * 2.0) / pitch);
+	float nrows = floor((h_px - top_inset - bottom_inset) / pitch);
+	float2 cell = floor(wl / pitch);
+	float2 cf = frac(wl / pitch);
+
+	if (wl.x >= 0.0 && wl.y >= 0.0 && cell.x < ncols && cell.y < nrows &&
+	    cf.x > 0.20 && cf.x < 0.72 && cf.y > 0.22 && cf.y < 0.78) {
+		float2 wid = float2(bldg * 13.7 + cell.x, cell.y - bldg * 5.3);
+		float occupied = step(shash2(wid), 0.5);
+		float lit = occupied;
+		if (twinkle_active > 0.5 && occupied > 0.5) {
+			// Per-window rate and phase offsets keep fades unsynchronized.
+			float rate = 0.6 + 1.4 * shash2(wid + 19.1);
+			float ph = shash2(wid + 47.3);
+			lit = 0.5 + 0.5 * sin((twinkle_phase * rate + ph) * 6.2831853);
+		}
+		float4 wc = lerp(window_off_color, window_on_color, lit);
+		outc = blend_over(outc, wc);
+	}
+
+	outc.a *= body_a;
+	return outc;
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSSkyline(v_in);
+	}
+}
