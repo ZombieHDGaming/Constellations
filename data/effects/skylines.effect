@@ -7,7 +7,10 @@ uniform float2 canvas_size;
 uniform float noise_seed;
 uniform float drift_px;         // accumulated horizontal slide (Location Drift)
 uniform float height_variation; // 0 = uniform roofline, 1 = maximum randomness
+uniform float min_height;       // floor of the height range, fraction of canvas
 uniform float width_variation;  // 0 = even building widths, 1 = maximum jitter
+uniform float min_width;        // floor of the width range, fraction of the base slot
+uniform float shade_variation;  // per-building brightness spread, 1 = +/-50%
 uniform float window_occupancy; // fraction of windows drawn lit
 uniform float4 building_color;
 uniform float4 window_on_color;
@@ -42,8 +45,11 @@ float boundary(float i, float slot_w)
 {
 	// Jittered slot borders give adjacent buildings varied widths while
 	// keeping the skyline gap-free. The jitter must stay under half a slot
-	// so borders remain ordered and only neighbors can claim a pixel.
-	return (i + (shash(i) - 0.5) * 0.9 * saturate(width_variation)) * slot_w;
+	// so borders remain ordered and only neighbors can claim a pixel; the
+	// Minimum Width floor tightens it further so no building can shrink
+	// below min_width of the base slot.
+	float amp = min(0.45 * saturate(width_variation), (1.0 - saturate(min_width)) * 0.5);
+	return (i + (shash(i) - 0.5) * 2.0 * amp) * slot_w;
 }
 
 float4 blend_over(float4 dst, float4 src)
@@ -64,29 +70,44 @@ float4 PSSkyline(VertData v_in) : TARGET
 	float yb = ch - frag_px.y; // height above the source's bottom edge
 
 	// Resolve which jittered slot this pixel falls in; the jitter never
-	// moves a border more than 0.45 slots, so only the neighbors can claim it.
+	// moves a border more than 0.45 slots, so only the neighbors can claim
+	// it. Reuse the two nominal borders so most pixels hash three borders
+	// instead of four.
 	float fi = floor(x / slot_w);
+	float b0 = boundary(fi, slot_w);
+	float b1 = boundary(fi + 1.0, slot_w);
 	float bldg = fi;
-	if (x < boundary(fi, slot_w))
+	float left = b0;
+	float right = b1;
+	if (x < b0) {
 		bldg = fi - 1.0;
-	else if (x >= boundary(fi + 1.0, slot_w))
+		right = b0;
+		left = boundary(fi - 1.0, slot_w);
+	} else if (x >= b1) {
 		bldg = fi + 1.0;
-	float left = boundary(bldg, slot_w);
-	float right = boundary(bldg + 1.0, slot_w);
+		left = b1;
+		right = boundary(fi + 2.0, slot_w);
+	}
 
 	// Roofline: an even 55% of the canvas at zero variation, spreading
-	// toward 15%..95% as Building Height Variation approaches 1.
+	// toward 15%..95% as Building Height Variation approaches 1. The
+	// Minimum Height floor lifts the bottom of that range; heights stay
+	// uniformly distributed between the floor and the top.
 	float hr = frac(sin(bldg * 113.5 + noise_seed * 269.5 + 7.3) * 43758.5453);
-	float h_px = (0.55 + (hr - 0.5) * 0.8 * saturate(height_variation)) * ch;
+	float h_high = 0.55 + 0.4 * saturate(height_variation);
+	float h_low = max(0.55 - 0.4 * saturate(height_variation), saturate(min_height));
+	float h_px = lerp(h_low, max(h_high, h_low), hr) * ch;
 
 	float body_a = 1.0 - smoothstep(h_px - 0.75, h_px + 0.75, yb);
 	if (body_a <= 0.0)
 		return float4(0.0, 0.0, 0.0, 0.0);
 
-	// Subtle per-building shading keeps same-height neighbors readable
-	// without straying far from the chosen building color.
-	float shade = 0.9 + 0.2 * frac(sin(bldg * 91.7 + noise_seed * 269.5 + 3.1) * 43758.5453);
-	float4 outc = float4(building_color.rgb * shade, building_color.a);
+	// Per-building shading keeps same-height neighbors readable. The
+	// Shade Variation slider sets the spread: 0 = uniform color, 1 =
+	// +/-50% brightness around the chosen building color.
+	float sr = frac(sin(bldg * 91.7 + noise_seed * 269.5 + 3.1) * 43758.5453);
+	float shade = 1.0 + (sr - 0.5) * saturate(shade_variation);
+	float4 outc = float4(saturate(building_color.rgb * shade), building_color.a);
 
 	// Window grid, scaled with the canvas and inset from every edge so no
 	// window is clipped by a roofline, a wall, or the ground.
