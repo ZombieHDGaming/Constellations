@@ -21,6 +21,8 @@ struct csky_source {
 	int seed;
 
 	float height_variation;
+	float width_variation;
+	float window_occupancy;
 	struct vec4 building_color;
 	struct vec4 window_on_color;
 	struct vec4 window_off_color;
@@ -67,6 +69,8 @@ static void csky_update(void *data, obs_data_t *settings)
 	s->seed = (int)obs_data_get_int(settings, "seed");
 
 	s->height_variation = (float)obs_data_get_double(settings, "height_variation");
+	s->width_variation = (float)obs_data_get_double(settings, "width_variation");
+	s->window_occupancy = (float)obs_data_get_double(settings, "window_occupancy");
 	vec4_from_rgba(&s->building_color, (uint32_t)obs_data_get_int(settings, "building_color"));
 	vec4_from_rgba(&s->window_on_color, (uint32_t)obs_data_get_int(settings, "window_on_color"));
 	vec4_from_rgba(&s->window_off_color, (uint32_t)obs_data_get_int(settings, "window_off_color"));
@@ -159,6 +163,12 @@ static void csky_draw(struct csky_source *s, uint32_t width, uint32_t height)
 	p = gs_effect_get_param_by_name(s->effect, "height_variation");
 	if (p)
 		gs_effect_set_float(p, s->height_variation);
+	p = gs_effect_get_param_by_name(s->effect, "width_variation");
+	if (p)
+		gs_effect_set_float(p, s->width_variation);
+	p = gs_effect_get_param_by_name(s->effect, "window_occupancy");
+	if (p)
+		gs_effect_set_float(p, s->window_occupancy);
 	p = gs_effect_get_param_by_name(s->effect, "building_color");
 	if (p)
 		gs_effect_set_vec4(p, &s->building_color);
@@ -257,12 +267,16 @@ static obs_properties_t *csky_props_common(bool is_filter)
 	obs_properties_add_int_slider(buildings, "seed", obs_module_text("Constellations.Skyline.Seed"), 0, 10000, 1);
 	obs_properties_add_float_slider(buildings, "height_variation",
 					obs_module_text("Constellations.Skyline.HeightVariation"), 0.0, 1.0, 0.01);
+	obs_properties_add_float_slider(buildings, "width_variation",
+					obs_module_text("Constellations.Skyline.WidthVariation"), 0.0, 1.0, 0.01);
 	obs_properties_add_color_alpha(buildings, "building_color",
 				       obs_module_text("Constellations.Skyline.BuildingColor"));
 	obs_properties_add_group(props, "buildings_group", obs_module_text("Constellations.Skyline.Group.Buildings"),
 				 OBS_GROUP_NORMAL, buildings);
 
 	obs_properties_t *windows = obs_properties_create();
+	obs_properties_add_float_slider(windows, "window_occupancy",
+					obs_module_text("Constellations.Skyline.Occupancy"), 0.0, 1.0, 0.01);
 	obs_properties_add_color_alpha(windows, "window_on_color",
 				       obs_module_text("Constellations.Skyline.WindowOnColor"));
 	obs_properties_add_color_alpha(windows, "window_off_color",
@@ -303,6 +317,8 @@ static void csky_defaults_common(obs_data_t *settings)
 {
 	obs_data_set_default_int(settings, "seed", 1234);
 	obs_data_set_default_double(settings, "height_variation", 0.5);
+	obs_data_set_default_double(settings, "width_variation", 0.65);
+	obs_data_set_default_double(settings, "window_occupancy", 0.5);
 	obs_data_set_default_int(settings, "building_color", 0xFF3A2A1E);
 	obs_data_set_default_int(settings, "window_on_color", 0xFF66D9FF);
 	obs_data_set_default_int(settings, "window_off_color", 0xFF241A12);

@@ -7,6 +7,8 @@ uniform float2 canvas_size;
 uniform float noise_seed;
 uniform float drift_px;         // accumulated horizontal slide (Location Drift)
 uniform float height_variation; // 0 = uniform roofline, 1 = maximum randomness
+uniform float width_variation;  // 0 = even building widths, 1 = maximum jitter
+uniform float window_occupancy; // fraction of windows drawn lit
 uniform float4 building_color;
 uniform float4 window_on_color;
 uniform float4 window_off_color;
@@ -39,8 +41,9 @@ float shash2(float2 p)
 float boundary(float i, float slot_w)
 {
 	// Jittered slot borders give adjacent buildings varied widths while
-	// keeping the skyline gap-free.
-	return (i + (shash(i) - 0.5) * 0.6) * slot_w;
+	// keeping the skyline gap-free. The jitter must stay under half a slot
+	// so borders remain ordered and only neighbors can claim a pixel.
+	return (i + (shash(i) - 0.5) * 0.9 * saturate(width_variation)) * slot_w;
 }
 
 float4 blend_over(float4 dst, float4 src)
@@ -61,7 +64,7 @@ float4 PSSkyline(VertData v_in) : TARGET
 	float yb = ch - frag_px.y; // height above the source's bottom edge
 
 	// Resolve which jittered slot this pixel falls in; the jitter never
-	// moves a border more than 0.3 slots, so only the neighbors can claim it.
+	// moves a border more than 0.45 slots, so only the neighbors can claim it.
 	float fi = floor(x / slot_w);
 	float bldg = fi;
 	if (x < boundary(fi, slot_w))
@@ -100,7 +103,7 @@ float4 PSSkyline(VertData v_in) : TARGET
 	if (wl.x >= 0.0 && wl.y >= 0.0 && cell.x < ncols && cell.y < nrows &&
 	    cf.x > 0.20 && cf.x < 0.72 && cf.y > 0.22 && cf.y < 0.78) {
 		float2 wid = float2(bldg * 13.7 + cell.x, cell.y - bldg * 5.3);
-		float occupied = step(shash2(wid), 0.5);
+		float occupied = step(shash2(wid), window_occupancy);
 		float lit = occupied;
 		if (twinkle_active > 0.5 && occupied > 0.5) {
 			// Per-window rate and phase offsets keep fades unsynchronized.
