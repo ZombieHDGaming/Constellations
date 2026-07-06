@@ -454,6 +454,8 @@ static void add_item_group(obs_properties_t *root, struct cpat_renderer *r, int 
 	obs_property_list_add_int(sh, obs_module_text("Constellations.Shape.Squircle"), CSHAPE_SQUIRCLE);
 	obs_property_list_add_int(sh, obs_module_text("Constellations.Shape.HLine"), CSHAPE_HLINE);
 	obs_property_list_add_int(sh, obs_module_text("Constellations.Shape.VLine"), CSHAPE_VLINE);
+	obs_property_list_add_int(sh, obs_module_text("Constellations.Shape.Star"), CSHAPE_STAR);
+	obs_property_list_add_int(sh, obs_module_text("Constellations.Shape.Heart"), CSHAPE_HEART);
 	obs_property_set_modified_callback(sh, item_kind_modified);
 
 	snprintf(key, sizeof(key), "item_%d_outline_only", i + 1);

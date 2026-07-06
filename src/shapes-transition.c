@@ -645,6 +645,8 @@ static obs_properties_t *cshape_properties(void *data)
 	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.Squircle"), CSHAPE_SQUIRCLE);
 	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.HLine"), CSHAPE_HLINE);
 	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.VLine"), CSHAPE_VLINE);
+	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.Star"), CSHAPE_STAR);
+	obs_property_list_add_int(p, obs_module_text("Constellations.Shape.Heart"), CSHAPE_HEART);
 	obs_property_set_modified_callback(p, prop_shape_changed);
 
 	obs_properties_add_int_slider(props, "polygon_sides", obs_module_text("Constellations.Shape.PolySides"), 3, 24,

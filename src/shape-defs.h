@@ -18,6 +18,8 @@ enum constellations_shape {
 	CSHAPE_SQUIRCLE = 4,
 	CSHAPE_HLINE = 5,
 	CSHAPE_VLINE = 6,
+	CSHAPE_STAR = 7,
+	CSHAPE_HEART = 8,
 };
 
 enum constellations_item_kind {
@@ -83,6 +85,7 @@ enum constellations_tiling_mode {
 
 void constellations_register_pattern_source(void);
 void constellations_register_topography_source(void);
+void constellations_register_topography_filter(void);
 void constellations_register_skylines(void);
 void constellations_register_pattern_filter(void);
 void constellations_register_shapes_transition(void);
