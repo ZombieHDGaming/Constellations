@@ -39,6 +39,9 @@ struct cpat_item {
 	int twinkle_mode;
 	float twinkle_amount;
 	float twinkle_speed;
+
+	int speed_drift_mode;
+	float speed_drift_amount;
 };
 
 struct cpat_renderer {
@@ -62,7 +65,6 @@ struct cpat_renderer {
 	bool alternating_lines;
 	bool speed_drift;
 	float speed_drift_amount;
-	bool speed_drift_per_item;
 	bool location_drift;
 	float location_drift_amount;
 
