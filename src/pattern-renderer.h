@@ -35,6 +35,13 @@ struct cpat_item {
 	float size;
 	float rotation_deg;
 	float density;
+
+	int twinkle_mode;
+	float twinkle_amount;
+	float twinkle_speed;
+
+	int speed_drift_mode;
+	float speed_drift_amount;
 };
 
 struct cpat_renderer {
@@ -45,6 +52,7 @@ struct cpat_renderer {
 	struct vec4 background_color;
 	float anchor_x_pct;
 	float anchor_y_pct;
+	float canvas_rotation_deg;
 
 	uint32_t item_count;
 	struct cpat_item items[CONSTELLATIONS_MAX_ITEMS];
@@ -74,7 +82,9 @@ struct cpat_renderer {
 	float vignette_softness;
 	bool vignette_inverted;
 
-	double phase;
+	/* Accumulated screen-space motion offset; integrating each tick means
+	 * speed and angle changes steer the pattern instead of teleporting it. */
+	double motion_off_x, motion_off_y;
 	double elapsed_time;
 
 	gs_effect_t *effect;

@@ -76,6 +76,18 @@ enum constellations_grid_order {
 	CGRID_ORDERED = 1,
 };
 
+enum constellations_item_twinkle_mode {
+	CTWINKLE_GLOBAL = 0,
+	CTWINKLE_CUSTOM = 1,
+	CTWINKLE_OFF = 2,
+};
+
+enum constellations_item_speed_drift_mode {
+	CSDRIFT_GLOBAL = 0,
+	CSDRIFT_CUSTOM = 1,
+	CSDRIFT_OFF = 2,
+};
+
 enum constellations_tiling_mode {
 	CTILE_GRID = 0,
 	CTILE_TIGHT = 1,
