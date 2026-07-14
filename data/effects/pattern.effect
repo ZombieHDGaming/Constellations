@@ -14,10 +14,11 @@ uniform int polygon_sides;
 uniform float stroke_thickness;
 uniform float outline_only;
 
-uniform float motion_phase;
-uniform float2 motion_dir;
+uniform float2 lattice_dir;    // canvas rotation axes (cos, sin)
+uniform float2 motion_offset;  // accumulated screen-space motion (px)
 uniform float alt_lines;
 uniform float drift_speed_amt;
+uniform float drift_speed_seed; // shared across items unless per-item drift
 uniform float drift_loc_amt;
 uniform float item_seed;
 uniform float elapsed_time;  // seconds since the source was created
@@ -181,18 +182,22 @@ float2 cell_local_at(float2 frag_px, int dcol, int drow, out float2 cell_id)
 {
 	float cs = max(cell_size, 1.0);
 	float2 pos = frag_px - anchor;
-	float2 perp = float2(-motion_dir.y, motion_dir.x);
+	float2 axis = lattice_dir;
+	float2 perp = float2(-axis.y, axis.x);
 
-	float m_along = dot(pos, motion_dir);
-	float m_perp  = dot(pos, perp);
+	// Decompose both the fragment and the motion offset onto the (rotated)
+	// lattice axes. The perpendicular part of the motion scrolls whole rows;
+	// the along-row part is what alternating lines and speed drift modulate.
+	float m_along = dot(pos, axis);
+	float m_perp  = dot(pos, perp) - dot(motion_offset, perp);
 
 	// Round-to-nearest so cell (0,0) is centered on the anchor.
 	float row = floor(m_perp / cs + 0.5) + float(drow);
-	float col_shift = motion_phase;
+	float col_shift = dot(motion_offset, axis);
 	if (alt_lines > 0.5 && frac(row * 0.5) > 0.25)
 		col_shift = -col_shift;
 	if (drift_speed_amt > 0.0) {
-		float s = (hash11(float2(row, 7.0), item_seed) - 0.5) * 2.0 * drift_speed_amt;
+		float s = (hash11(float2(row, 7.0), drift_speed_seed) - 0.5) * 2.0 * drift_speed_amt;
 		col_shift *= (1.0 + s);
 	}
 	float brick_shift = 0.0;
@@ -246,8 +251,10 @@ int tile_reach()
 {
 	float cs = max(cell_size, 1.0);
 	// 0.71 covers the diagonal extent of squares/crosses. The outline stroke
-	// sits entirely inside the shape edge, so it needs no extra reach.
+	// is centered on the shape edge, so half of it hangs outside the fill.
 	float extent = shape_size * 0.71;
+	if (outline_only > 0.5)
+		extent += stroke_thickness * shape_size * 0.5;
 	extent += drift_loc_amt * cs;
 	float r = ceil(extent / cs - 0.5);
 	if (r < 0.0) r = 0.0;
@@ -310,7 +317,7 @@ float4 PSShape(VertData v_in) : TARGET
 				p = rotate2(p, shape_rotation);
 				float d = shape_sdf(p);
 				if (outline_only > 0.5)
-					d = max(d, -d - stroke_w);
+					d = abs(d) - stroke_w * 0.5;
 				float a = 1.0 - smoothstep(-0.75, 0.75, d);
 				alpha = max(alpha, a * twinkle_alpha_calc(cid));
 			}
@@ -330,10 +337,10 @@ float4 PSShape(VertData v_in) : TARGET
 		}
 		if (outline_only > 0.5) {
 			// Replace the filled SDF with a stroke of width
-			// stroke_thickness * shape_size drawn on the inner edge: the
-			// band spans d in [-w, 0] so the outline never extends past
-			// the shape's footprint.
-			best_d = max(best_d, -best_d - stroke_w);
+			// stroke_thickness * shape_size centered on the shape edge
+			// (d in [-w/2, +w/2]), so every shape's outline renders with
+			// the same visual weight regardless of its SDF interior.
+			best_d = abs(best_d) - stroke_w * 0.5;
 		}
 		// best_d is discontinuous where cell ownership changes
 		// (step-and-repeat) or across brick-shifted rows, so an unbounded

@@ -131,6 +131,7 @@ void cpat_renderer_set_defaults(obs_data_t *settings, bool include_canvas)
 	}
 	obs_data_set_default_double(settings, "anchor_x_pct", 50.0);
 	obs_data_set_default_double(settings, "anchor_y_pct", 50.0);
+	obs_data_set_default_double(settings, "canvas_rotation", 0.0);
 	obs_data_set_default_int(settings, "item_count", 1);
 	obs_data_set_default_int(settings, "layout_mode", CLAYOUT_LAYERED);
 	obs_data_set_default_int(settings, "grid_order", CGRID_RANDOM);
@@ -150,6 +151,9 @@ void cpat_renderer_set_defaults(obs_data_t *settings, bool include_canvas)
 		obs_data_set_default_double(settings, DK("size"), 24.0);
 		obs_data_set_default_double(settings, DK("rotation"), 0.0);
 		obs_data_set_default_double(settings, DK("density"), 2.0);
+		obs_data_set_default_int(settings, DK("twinkle_mode"), CTWINKLE_GLOBAL);
+		obs_data_set_default_double(settings, DK("twinkle_amount"), 0.5);
+		obs_data_set_default_double(settings, DK("twinkle_speed"), 1.0);
 #undef DK
 	}
 
@@ -158,6 +162,7 @@ void cpat_renderer_set_defaults(obs_data_t *settings, bool include_canvas)
 	obs_data_set_default_bool(settings, "alternating_lines", false);
 	obs_data_set_default_bool(settings, "speed_drift", false);
 	obs_data_set_default_double(settings, "speed_drift_amount", 0.25);
+	obs_data_set_default_bool(settings, "speed_drift_per_item", false);
 	obs_data_set_default_bool(settings, "location_drift", false);
 	obs_data_set_default_double(settings, "location_drift_amount", 0.15);
 
@@ -261,14 +266,30 @@ static void apply_item_kind_visibility(obs_properties_t *props, obs_data_t *sett
 #undef VIS
 }
 
+static void apply_item_twinkle_visibility(obs_properties_t *props, obs_data_t *settings, int i)
+{
+	char key[64];
+	snprintf(key, sizeof(key), "item_%d_twinkle_mode", i + 1);
+	bool custom = (int)obs_data_get_int(settings, key) == CTWINKLE_CUSTOM;
+	snprintf(key, sizeof(key), "item_%d_enabled", i + 1);
+	bool en = obs_data_get_bool(settings, key);
+	const char *names[] = {"twinkle_amount", "twinkle_speed"};
+	for (size_t k = 0; k < sizeof(names) / sizeof(names[0]); ++k) {
+		snprintf(key, sizeof(key), "item_%d_%s", i + 1, names[k]);
+		obs_property_t *pp = obs_properties_get(props, key);
+		if (pp)
+			obs_property_set_visible(pp, en && custom);
+	}
+}
+
 static void apply_item_enabled_visibility(obs_properties_t *props, obs_data_t *settings, int i)
 {
 	char key[64];
 	snprintf(key, sizeof(key), "item_%d_enabled", i + 1);
 	bool en = obs_data_get_bool(settings, key);
-	const char *names[] = {"kind",   "shape",      "outline_only", "polygon_sides", "stroke_thickness",
-			       "color",  "image_path", "source_name",  "size",          "rotation",
-			       "density"};
+	const char *names[] = {"kind",    "shape",       "outline_only", "polygon_sides", "stroke_thickness",
+			       "color",   "image_path",  "source_name",  "size",          "rotation",
+			       "density", "twinkle_mode"};
 	for (size_t k = 0; k < sizeof(names) / sizeof(names[0]); ++k) {
 		snprintf(key, sizeof(key), "item_%d_%s", i + 1, names[k]);
 		obs_property_t *pp = obs_properties_get(props, key);
@@ -277,6 +298,7 @@ static void apply_item_enabled_visibility(obs_properties_t *props, obs_data_t *s
 	}
 	if (en)
 		apply_item_kind_visibility(props, settings, i);
+	apply_item_twinkle_visibility(props, settings, i);
 }
 
 static void apply_item_count_visibility(obs_properties_t *props, obs_data_t *settings)
@@ -329,6 +351,9 @@ static void apply_motion_visibility(obs_properties_t *props, obs_data_t *setting
 	bool ld = obs_data_get_bool(settings, "location_drift");
 	obs_property_t *pp;
 	pp = obs_properties_get(props, "speed_drift_amount");
+	if (pp)
+		obs_property_set_visible(pp, sd);
+	pp = obs_properties_get(props, "speed_drift_per_item");
 	if (pp)
 		obs_property_set_visible(pp, sd);
 	pp = obs_properties_get(props, "location_drift_amount");
@@ -414,6 +439,15 @@ static bool item_kind_modified(obs_properties_t *props, obs_property_t *p, obs_d
 	return true;
 }
 
+static bool item_twinkle_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	int i = item_index_from_prop(p);
+	if (i < 0)
+		return false;
+	apply_item_twinkle_visibility(props, settings, i);
+	return true;
+}
+
 static bool item_enabled_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
 	int i = item_index_from_prop(p);
@@ -486,6 +520,18 @@ static void add_item_group(obs_properties_t *root, struct cpat_renderer *r, int 
 	snprintf(key, sizeof(key), "item_%d_density", i + 1);
 	obs_properties_add_float_slider(grp, key, obs_module_text("Constellations.Item.Density"), 0.1, 20.0, 0.1);
 
+	snprintf(key, sizeof(key), "item_%d_twinkle_mode", i + 1);
+	obs_property_t *twm = obs_properties_add_list(grp, key, obs_module_text("Constellations.Item.Twinkle"),
+						      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(twm, obs_module_text("Constellations.Item.Twinkle.Global"), CTWINKLE_GLOBAL);
+	obs_property_list_add_int(twm, obs_module_text("Constellations.Item.Twinkle.Custom"), CTWINKLE_CUSTOM);
+	obs_property_list_add_int(twm, obs_module_text("Constellations.Item.Twinkle.Off"), CTWINKLE_OFF);
+	obs_property_set_modified_callback(twm, item_twinkle_modified);
+	snprintf(key, sizeof(key), "item_%d_twinkle_amount", i + 1);
+	obs_properties_add_float_slider(grp, key, obs_module_text("Constellations.Item.TwinkleAmount"), 0.0, 1.0, 0.01);
+	snprintf(key, sizeof(key), "item_%d_twinkle_speed", i + 1);
+	obs_properties_add_float_slider(grp, key, obs_module_text("Constellations.Item.TwinkleSpeed"), 0.05, 5.0, 0.05);
+
 	char gid[64];
 	snprintf(gid, sizeof(gid), "item_%d_group", i + 1);
 	obs_properties_add_group(root, gid, label, OBS_GROUP_NORMAL, grp);
@@ -503,6 +549,8 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 						100.0, 0.5);
 		obs_properties_add_float_slider(canvas, "anchor_y_pct", obs_module_text("Constellations.Anchor.Y"), 0.0,
 						100.0, 0.5);
+		obs_properties_add_float_slider(canvas, "canvas_rotation",
+						obs_module_text("Constellations.Canvas.Rotation"), 0.0, 360.0, 1.0);
 		obs_properties_add_group(props, "canvas_group", obs_module_text("Constellations.Group.Canvas"),
 					 OBS_GROUP_NORMAL, canvas);
 	} else {
@@ -512,6 +560,8 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 						100.0, 0.5);
 		obs_properties_add_float_slider(props, "anchor_y_pct", obs_module_text("Constellations.Anchor.Y"), 0.0,
 						100.0, 0.5);
+		obs_properties_add_float_slider(props, "canvas_rotation",
+						obs_module_text("Constellations.Canvas.Rotation"), 0.0, 360.0, 1.0);
 	}
 
 	obs_property_t *ic = obs_properties_add_int_slider(
@@ -545,6 +595,8 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 	obs_property_set_modified_callback(sd, motion_modified);
 	obs_properties_add_float_slider(motion, "speed_drift_amount",
 					obs_module_text("Constellations.Motion.SpeedDriftAmount"), 0.0, 1.0, 0.01);
+	obs_properties_add_bool(motion, "speed_drift_per_item",
+				obs_module_text("Constellations.Motion.SpeedDriftPerItem"));
 	obs_property_t *ld = obs_properties_add_bool(motion, "location_drift",
 						     obs_module_text("Constellations.Motion.LocationDrift"));
 	obs_property_set_modified_callback(ld, motion_modified);
@@ -641,6 +693,9 @@ static void cpat_item_update(struct cpat_item *it, obs_data_t *settings, int ind
 	it->density = (float)obs_data_get_double(settings, IK("density"));
 	if (it->density <= 0.0f)
 		it->density = 0.1f;
+	it->twinkle_mode = (int)obs_data_get_int(settings, IK("twinkle_mode"));
+	it->twinkle_amount = (float)obs_data_get_double(settings, IK("twinkle_amount"));
+	it->twinkle_speed = (float)obs_data_get_double(settings, IK("twinkle_speed"));
 #undef IK
 }
 
@@ -659,6 +714,7 @@ void cpat_renderer_update(struct cpat_renderer *r, obs_data_t *settings, bool in
 	r->has_background = (r->background_color.w > 0.0001f);
 	r->anchor_x_pct = (float)obs_data_get_double(settings, "anchor_x_pct");
 	r->anchor_y_pct = (float)obs_data_get_double(settings, "anchor_y_pct");
+	r->canvas_rotation_deg = (float)obs_data_get_double(settings, "canvas_rotation");
 
 	int ic = (int)obs_data_get_int(settings, "item_count");
 	if (ic < 1)
@@ -678,6 +734,7 @@ void cpat_renderer_update(struct cpat_renderer *r, obs_data_t *settings, bool in
 	r->alternating_lines = obs_data_get_bool(settings, "alternating_lines");
 	r->speed_drift = obs_data_get_bool(settings, "speed_drift");
 	r->speed_drift_amount = (float)obs_data_get_double(settings, "speed_drift_amount");
+	r->speed_drift_per_item = obs_data_get_bool(settings, "speed_drift_per_item");
 	r->location_drift = obs_data_get_bool(settings, "location_drift");
 	r->location_drift_amount = (float)obs_data_get_double(settings, "location_drift_amount");
 
@@ -698,7 +755,12 @@ void cpat_renderer_update(struct cpat_renderer *r, obs_data_t *settings, bool in
 
 void cpat_renderer_tick(struct cpat_renderer *r, float seconds)
 {
-	r->phase += (double)r->motion_speed * (double)seconds;
+	/* Integrate motion in screen space so speed and angle changes steer the
+	 * pattern instead of teleporting it (same scheme as Topography drift). */
+	double ang = (double)r->motion_angle_deg * (M_PI / 180.0);
+	double step = (double)r->motion_speed * (double)seconds;
+	r->motion_off_x += cos(ang) * step;
+	r->motion_off_y += sin(ang) * step;
 	r->elapsed_time += (double)seconds;
 
 	uint32_t count = r->item_count;
@@ -818,36 +880,54 @@ static void set_common_uniforms(struct cpat_renderer *r, struct cpat_item *it, u
 	if (p)
 		gs_effect_set_float(p, it->outline_only ? 1.0f : 0.0f);
 
-	float mang = r->motion_angle_deg * (float)(M_PI / 180.0);
-	struct vec2 mdir = {cosf(mang), sinf(mang)};
-	p = gs_effect_get_param_by_name(r->effect, "motion_dir");
+	/* The lattice axes come from the canvas rotation; motion is a free
+	 * screen-space offset the shader decomposes onto those axes. */
+	float crot = r->canvas_rotation_deg * (float)(M_PI / 180.0);
+	struct vec2 ldir = {cosf(crot), sinf(crot)};
+	p = gs_effect_get_param_by_name(r->effect, "lattice_dir");
 	if (p)
-		gs_effect_set_vec2(p, &mdir);
-	p = gs_effect_get_param_by_name(r->effect, "motion_phase");
+		gs_effect_set_vec2(p, &ldir);
+	struct vec2 moff = {(float)r->motion_off_x, (float)r->motion_off_y};
+	p = gs_effect_get_param_by_name(r->effect, "motion_offset");
 	if (p)
-		gs_effect_set_float(p, (float)r->phase);
+		gs_effect_set_vec2(p, &moff);
 	p = gs_effect_get_param_by_name(r->effect, "alt_lines");
 	if (p)
 		gs_effect_set_float(p, r->alternating_lines ? 1.0f : 0.0f);
 	p = gs_effect_get_param_by_name(r->effect, "drift_speed_amt");
 	if (p)
 		gs_effect_set_float(p, r->speed_drift ? r->speed_drift_amount : 0.0f);
+	float item_seed = (float)index * 17.31f;
+	/* A shared seed keeps every item's rows drifting in unison; the per-item
+	 * option restores the old scattered behavior. */
+	p = gs_effect_get_param_by_name(r->effect, "drift_speed_seed");
+	if (p)
+		gs_effect_set_float(p, r->speed_drift_per_item ? item_seed : 0.0f);
 	p = gs_effect_get_param_by_name(r->effect, "drift_loc_amt");
 	if (p)
 		gs_effect_set_float(p, r->location_drift ? r->location_drift_amount : 0.0f);
 	p = gs_effect_get_param_by_name(r->effect, "item_seed");
 	if (p)
-		gs_effect_set_float(p, (float)index * 17.31f);
+		gs_effect_set_float(p, item_seed);
 	p = gs_effect_get_param_by_name(r->effect, "elapsed_time");
 	if (p)
 		gs_effect_set_float(p, (float)r->elapsed_time);
 
+	float tw_amount = 0.0f;
+	float tw_speed = 1.0f;
+	if (it->twinkle_mode == CTWINKLE_CUSTOM) {
+		tw_amount = it->twinkle_amount;
+		tw_speed = it->twinkle_speed;
+	} else if (it->twinkle_mode == CTWINKLE_GLOBAL && r->twinkle_enabled) {
+		tw_amount = r->twinkle_amount;
+		tw_speed = r->twinkle_speed;
+	}
 	p = gs_effect_get_param_by_name(r->effect, "twinkle_amount");
 	if (p)
-		gs_effect_set_float(p, r->twinkle_enabled ? r->twinkle_amount : 0.0f);
+		gs_effect_set_float(p, tw_amount);
 	p = gs_effect_get_param_by_name(r->effect, "twinkle_speed");
 	if (p)
-		gs_effect_set_float(p, r->twinkle_speed);
+		gs_effect_set_float(p, tw_speed);
 
 	p = gs_effect_get_param_by_name(r->effect, "layout_mode");
 	if (p)
