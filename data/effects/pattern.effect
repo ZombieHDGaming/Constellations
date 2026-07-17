@@ -94,6 +94,22 @@ float sd_polygon(float2 p, float r, int n)
 	return pr.y - r * cos(sector * 0.5);
 }
 
+// Polygon re-centered on its bounding box. sd_polygon centers the shape on
+// its circumcenter, but odd side counts are vertically asymmetric (the top
+// vertex reaches r while the flat bottom edge stops at the apothem), which
+// leaves triangles and pentagons sitting high in their cell compared to
+// circles and squares. Even side counts are symmetric and need no offset.
+float sd_polygon_centered(float2 p, float r, int n)
+{
+	int sides = n;
+	if (sides < 3) sides = 3;
+	float fn = float(sides);
+	float yc = 0.0;
+	if (frac(fn * 0.5) > 0.25)
+		yc = (r * cos(3.14159265 / fn) - r) * 0.5;
+	return sd_polygon(float2(p.x, p.y + yc), r, sides);
+}
+
 float sd_squircle(float2 p, float r)
 {
 	float2 ap = abs(p);
@@ -288,7 +304,7 @@ float shape_sdf(float2 p)
 	if (shape_kind == 0) return sd_circle(p, r);
 	if (shape_kind == 1) return sd_cross(p, r, max(stroke_thickness, 0.05) * shape_size * 0.5);
 	if (shape_kind == 2) return sd_box(p, float2(r, r));
-	if (shape_kind == 3) return sd_polygon(p, r, polygon_sides);
+	if (shape_kind == 3) return sd_polygon_centered(p, r, polygon_sides);
 	if (shape_kind == 4) return sd_squircle(p, r);
 	if (shape_kind == 5) return abs(p.y) - r;
 	if (shape_kind == 7) return sd_star5(p, r);
