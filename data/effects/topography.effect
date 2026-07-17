@@ -42,31 +42,48 @@ float thash(float2 p)
 	return frac(sin(dot(p, float2(127.1, 311.7)) + noise_seed * 269.5) * 43758.5453);
 }
 
-float vnoise(float2 p)
+// Value noise plus its analytic map-space gradient. Screen-space ddx/ddy of
+// the height field is only sampled once per 2x2 pixel quad, and that noisy
+// estimate fed the line-width math with grain that widened lines into
+// blurred patches; the closed-form derivative is exact and smooth.
+float vnoise_grad(float2 p, out float2 g)
 {
 	float2 i = floor(p);
 	float2 f = frac(p);
+	float s = saturate(smoothness);
 	// Blend between linear and quintic lattice interpolation: low smoothness
 	// keeps derivative breaks at cell borders, so the contour lines pick up
 	// sharp angles instead of rounded curves.
 	float2 q = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-	float2 u = lerp(f, q, saturate(smoothness));
+	float2 u = lerp(f, q, s);
+	float2 dq = 30.0 * f * f * (f - 1.0) * (f - 1.0);
+	float2 du = lerp(float2(1.0, 1.0), dq, s);
 	float a = thash(i);
 	float b = thash(i + float2(1.0, 0.0));
 	float c = thash(i + float2(0.0, 1.0));
 	float d = thash(i + float2(1.0, 1.0));
+	g = du * float2((b - a) + ((d - c) - (b - a)) * u.y,
+			(c - a) + ((d - b) - (c - a)) * u.x);
 	return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
 }
 
-float height_at(float2 p)
+float height_grad_at(float2 p, out float2 grad)
 {
 	float v = 0.0;
 	float amp = 0.5;
 	float2 q = p;
+	// Accumulated Jacobian of the octave transforms, so each octave's local
+	// gradient can be chained back into map space.
+	float4 J = float4(1.0, 0.0, 0.0, 1.0); // row-major (11, 12, 21, 22)
+	grad = float2(0.0, 0.0);
 	for (int i = 0; i < 5; i++) {
-		v += amp * vnoise(q);
+		float2 g;
+		v += amp * vnoise_grad(q, g);
+		grad += amp * float2(g.x * J.x + g.y * J.z, g.x * J.y + g.y * J.w);
 		// Rotate-and-scale between octaves so ridges don't align with axes.
 		q = float2(q.x * 1.6 - q.y * 1.2, q.x * 1.2 + q.y * 1.6) + 31.4;
+		J = float4(1.6 * J.x - 1.2 * J.z, 1.6 * J.y - 1.2 * J.w,
+			   1.2 * J.x + 1.6 * J.z, 1.2 * J.y + 1.6 * J.w);
 		amp *= 0.5;
 	}
 	return v;
@@ -89,15 +106,15 @@ float4 PSTopo(VertData v_in) : TARGET
 	// the source center so it reads like a camera moving over a fixed map.
 	float2 world = (frag_px - canvas_size * 0.5) / (100.0 * z) + drift_offset;
 
-	float f = height_at(world) * contour_levels;
-	// Screen-space distance to the nearest contour. The isotropic gradient
-	// (length of the derivative pair) keeps thickness even on diagonals
-	// where fwidth() overestimates, and the second-order term keeps the
+	float2 hg;
+	float f = height_grad_at(world, hg) * contour_levels;
+	// Screen-space distance to the nearest contour, from the analytic
+	// gradient converted to pixel units. The second-order term keeps the
 	// estimate honest where the field grazes a level without crossing it
 	// (peaks, pits, saddles) — a first-order df/grad collapses there and
 	// used to render jagged, double-width blobs.
 	float df = abs(frac(f + 0.5) - 0.5);
-	float grad = max(length(float2(ddx(f), ddy(f))), 1.0e-5);
+	float grad = max(length(hg) * contour_levels / (100.0 * z), 1.0e-5);
 	float curv = max(fwidth(grad), 1.0e-6);
 	float px_dist = 2.0 * df / (grad + sqrt(grad * grad + 2.0 * curv * df));
 
@@ -139,11 +156,15 @@ float4 PSTopo(VertData v_in) : TARGET
 
 	// Where the terrain is steep enough that neighboring contours would
 	// overlap on screen, blend toward their average coverage instead of
-	// drawing aliased line mush.
+	// drawing aliased line mush. A drawn line's footprint is the ink width
+	// plus ~1.5 px of AA ramp, and lines only merge once the contour
+	// spacing (1/grad) closes to that footprint — engaging the blend any
+	// earlier smeared still-resolvable lines into soft grey patches.
 	float line_mask = 1.0 - smoothstep(line_half_px - 0.75, line_half_px + 0.75, px_dist);
-	float density = saturate(grad * (2.0 * line_half_px + 3.0));
+	float footprint = 2.0 * line_half_px + 1.5;
+	float density = smoothstep(0.7, 1.0, grad * footprint);
 	float avg_cov = saturate(2.0 * line_half_px * grad);
-	line_mask = lerp(line_mask, avg_cov, density * density);
+	line_mask = lerp(line_mask, avg_cov, density);
 	float la = line_mask * line_color.a * speck_fade;
 	outc = blend_over(outc, float4(line_color.rgb, la));
 
