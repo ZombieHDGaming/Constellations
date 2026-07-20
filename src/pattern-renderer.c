@@ -414,6 +414,16 @@ static bool layout_mode_modified(obs_properties_t *props, obs_property_t *p, obs
 	return true;
 }
 
+static bool motion_reset_clicked(obs_properties_t *props, obs_property_t *p, void *data)
+{
+	UNUSED_PARAMETER(props);
+	UNUSED_PARAMETER(p);
+	struct cpat_renderer *r = data;
+	r->motion_off_along = 0.0;
+	r->motion_off_perp = 0.0;
+	return false;
+}
+
 static bool twinkle_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
 	UNUSED_PARAMETER(p);
@@ -621,6 +631,8 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 					360.0, 1.0);
 	obs_properties_add_float_slider(motion, "motion_speed", obs_module_text("Constellations.Motion.Speed"), -500.0,
 					500.0, 1.0);
+	obs_properties_add_button2(motion, "motion_reset", obs_module_text("Constellations.Motion.Reset"),
+				   motion_reset_clicked, r);
 	obs_properties_add_bool(motion, "alternating_lines", obs_module_text("Constellations.Motion.Alternating"));
 	obs_property_t *sd =
 		obs_properties_add_bool(motion, "speed_drift", obs_module_text("Constellations.Motion.SpeedDrift"));
@@ -786,12 +798,18 @@ void cpat_renderer_update(struct cpat_renderer *r, obs_data_t *settings, bool in
 
 void cpat_renderer_tick(struct cpat_renderer *r, float seconds)
 {
-	/* Integrate motion in screen space so speed and angle changes steer the
-	 * pattern instead of teleporting it (same scheme as Topography drift). */
-	double ang = (double)r->motion_angle_deg * (M_PI / 180.0);
+	/* Integrate motion each tick so speed and angle changes steer the
+	 * pattern instead of teleporting it (same scheme as Topography drift).
+	 * The screen-space velocity is decomposed onto the current lattice
+	 * axes and accumulated in lattice coordinates: that keeps the on-screen
+	 * travel direction equal to the motion angle while letting canvas
+	 * rotation rigidly rotate the whole (scrolled) pattern around the
+	 * anchor instead of around a point displaced by the accumulated
+	 * offset. */
+	double ang = (r->motion_angle_deg - r->canvas_rotation_deg) * (M_PI / 180.0);
 	double step = (double)r->motion_speed * (double)seconds;
-	r->motion_off_x += cos(ang) * step;
-	r->motion_off_y += sin(ang) * step;
+	r->motion_off_along += cos(ang) * step;
+	r->motion_off_perp += sin(ang) * step;
 	r->elapsed_time += (double)seconds;
 
 	uint32_t count = r->item_count;
@@ -911,14 +929,15 @@ static void set_common_uniforms(struct cpat_renderer *r, struct cpat_item *it, u
 	if (p)
 		gs_effect_set_float(p, it->outline_only ? 1.0f : 0.0f);
 
-	/* The lattice axes come from the canvas rotation; motion is a free
-	 * screen-space offset the shader decomposes onto those axes. */
+	/* The lattice axes come from the canvas rotation; motion is passed in
+	 * lattice coordinates (along-row, cross-row) so the accumulated scroll
+	 * rotates with the lattice around the anchor. */
 	float crot = r->canvas_rotation_deg * (float)(M_PI / 180.0);
 	struct vec2 ldir = {cosf(crot), sinf(crot)};
 	p = gs_effect_get_param_by_name(r->effect, "lattice_dir");
 	if (p)
 		gs_effect_set_vec2(p, &ldir);
-	struct vec2 moff = {(float)r->motion_off_x, (float)r->motion_off_y};
+	struct vec2 moff = {(float)r->motion_off_along, (float)r->motion_off_perp};
 	p = gs_effect_get_param_by_name(r->effect, "motion_offset");
 	if (p)
 		gs_effect_set_vec2(p, &moff);

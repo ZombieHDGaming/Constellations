@@ -82,9 +82,12 @@ struct cpat_renderer {
 	float vignette_softness;
 	bool vignette_inverted;
 
-	/* Accumulated screen-space motion offset; integrating each tick means
-	 * speed and angle changes steer the pattern instead of teleporting it. */
-	double motion_off_x, motion_off_y;
+	/* Accumulated motion in lattice coordinates (along-row, cross-row).
+	 * Integrating each tick means speed and angle changes steer the pattern
+	 * instead of teleporting it, and keeping the components in the lattice
+	 * frame means canvas rotation pivots on the anchor no matter how far
+	 * the pattern has scrolled. */
+	double motion_off_along, motion_off_perp;
 	double elapsed_time;
 
 	gs_effect_t *effect;
