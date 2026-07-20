@@ -414,6 +414,16 @@ static bool layout_mode_modified(obs_properties_t *props, obs_property_t *p, obs
 	return true;
 }
 
+static bool motion_reset_clicked(obs_properties_t *props, obs_property_t *p, void *data)
+{
+	UNUSED_PARAMETER(props);
+	UNUSED_PARAMETER(p);
+	struct cpat_renderer *r = data;
+	r->motion_off_along = 0.0;
+	r->motion_off_perp = 0.0;
+	return false;
+}
+
 static bool twinkle_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
 	UNUSED_PARAMETER(p);
@@ -621,6 +631,8 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 					360.0, 1.0);
 	obs_properties_add_float_slider(motion, "motion_speed", obs_module_text("Constellations.Motion.Speed"), -500.0,
 					500.0, 1.0);
+	obs_properties_add_button2(motion, "motion_reset", obs_module_text("Constellations.Motion.Reset"),
+				   motion_reset_clicked, r);
 	obs_properties_add_bool(motion, "alternating_lines", obs_module_text("Constellations.Motion.Alternating"));
 	obs_property_t *sd =
 		obs_properties_add_bool(motion, "speed_drift", obs_module_text("Constellations.Motion.SpeedDrift"));
