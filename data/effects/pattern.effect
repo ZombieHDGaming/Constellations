@@ -15,7 +15,7 @@ uniform float stroke_thickness;
 uniform float outline_only;
 
 uniform float2 lattice_dir;    // canvas rotation axes (cos, sin)
-uniform float2 motion_offset;  // accumulated screen-space motion (px)
+uniform float2 motion_offset;  // accumulated motion in lattice coords (along, perp) px
 uniform float alt_lines;
 uniform float drift_speed_amt;
 uniform float drift_speed_seed; // shared across items unless per-item drift
@@ -201,15 +201,17 @@ float2 cell_local_at(float2 frag_px, int dcol, int drow, out float2 cell_id)
 	float2 axis = lattice_dir;
 	float2 perp = float2(-axis.y, axis.x);
 
-	// Decompose both the fragment and the motion offset onto the (rotated)
-	// lattice axes. The perpendicular part of the motion scrolls whole rows;
-	// the along-row part is what alternating lines and speed drift modulate.
+	// Decompose the fragment onto the (rotated) lattice axes. The motion
+	// offset is already accumulated in lattice coordinates, so the scroll
+	// rotates with the lattice around the anchor. Its perpendicular part
+	// scrolls whole rows; the along-row part is what alternating lines and
+	// speed drift modulate.
 	float m_along = dot(pos, axis);
-	float m_perp  = dot(pos, perp) - dot(motion_offset, perp);
+	float m_perp  = dot(pos, perp) - motion_offset.y;
 
 	// Round-to-nearest so cell (0,0) is centered on the anchor.
 	float row = floor(m_perp / cs + 0.5) + float(drow);
-	float col_shift = dot(motion_offset, axis);
+	float col_shift = motion_offset.x;
 	if (alt_lines > 0.5 && frac(row * 0.5) > 0.25)
 		col_shift = -col_shift;
 	if (drift_speed_amt > 0.0) {
