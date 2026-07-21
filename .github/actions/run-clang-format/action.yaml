@@ -51,6 +51,8 @@ runs:
         if (( ${+RUNNER_DEBUG} )) setopt XTRACE
 
         print ::group::Install clang-format-19
+        brew tap --quiet obsproject/tools
+        brew trust obsproject/tools || true
         brew install --quiet obsproject/tools/clang-format@19
         print ::endgroup::
 
