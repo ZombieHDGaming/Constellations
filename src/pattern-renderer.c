@@ -150,12 +150,18 @@ void cpat_renderer_set_defaults(obs_data_t *settings, bool include_canvas)
 		obs_data_set_default_string(settings, DK("source_name"), "");
 		obs_data_set_default_double(settings, DK("size"), 24.0);
 		obs_data_set_default_double(settings, DK("rotation"), 0.0);
+		obs_data_set_default_double(settings, DK("offset_x"), 0.0);
+		obs_data_set_default_double(settings, DK("offset_y"), 0.0);
 		obs_data_set_default_double(settings, DK("density"), 2.0);
 		obs_data_set_default_int(settings, DK("twinkle_mode"), CTWINKLE_GLOBAL);
 		obs_data_set_default_double(settings, DK("twinkle_amount"), 0.5);
 		obs_data_set_default_double(settings, DK("twinkle_speed"), 1.0);
 		obs_data_set_default_int(settings, DK("speed_drift_mode"), CSDRIFT_GLOBAL);
 		obs_data_set_default_double(settings, DK("speed_drift_amount"), 0.25);
+		obs_data_set_default_int(settings, DK("autorot_mode"), CAROT_GLOBAL);
+		obs_data_set_default_double(settings, DK("autorot_speed"), 45.0);
+		obs_data_set_default_int(settings, DK("autorot_style"), CAROT_STYLE_RANDOM);
+		obs_data_set_default_int(settings, DK("autorot_seed"), 0);
 #undef DK
 	}
 
@@ -170,6 +176,11 @@ void cpat_renderer_set_defaults(obs_data_t *settings, bool include_canvas)
 	obs_data_set_default_bool(settings, "twinkle_enabled", false);
 	obs_data_set_default_double(settings, "twinkle_amount", 0.5);
 	obs_data_set_default_double(settings, "twinkle_speed", 1.0);
+
+	obs_data_set_default_bool(settings, "autorot_enabled", false);
+	obs_data_set_default_double(settings, "autorot_speed", 45.0);
+	obs_data_set_default_int(settings, "autorot_style", CAROT_STYLE_RANDOM);
+	obs_data_set_default_int(settings, "autorot_seed", 0);
 
 	obs_data_set_default_bool(settings, "vignette_enabled", false);
 	obs_data_set_default_double(settings, "vignette_size", 0.7);
@@ -296,14 +307,39 @@ static void apply_item_speed_drift_visibility(obs_properties_t *props, obs_data_
 		obs_property_set_visible(pp, en && custom);
 }
 
+static void apply_item_autorot_visibility(obs_properties_t *props, obs_data_t *settings, int i)
+{
+	char key[64];
+	snprintf(key, sizeof(key), "item_%d_autorot_mode", i + 1);
+	bool custom = (int)obs_data_get_int(settings, key) == CAROT_CUSTOM;
+	snprintf(key, sizeof(key), "item_%d_autorot_style", i + 1);
+	bool unison = (int)obs_data_get_int(settings, key) == CAROT_STYLE_UNISON;
+	snprintf(key, sizeof(key), "item_%d_enabled", i + 1);
+	bool en = obs_data_get_bool(settings, key);
+	obs_property_t *pp;
+	snprintf(key, sizeof(key), "item_%d_autorot_style", i + 1);
+	pp = obs_properties_get(props, key);
+	if (pp)
+		obs_property_set_visible(pp, en && custom);
+	snprintf(key, sizeof(key), "item_%d_autorot_speed", i + 1);
+	pp = obs_properties_get(props, key);
+	if (pp)
+		obs_property_set_visible(pp, en && custom && unison);
+	snprintf(key, sizeof(key), "item_%d_autorot_seed", i + 1);
+	pp = obs_properties_get(props, key);
+	if (pp)
+		obs_property_set_visible(pp, en && custom);
+}
+
 static void apply_item_enabled_visibility(obs_properties_t *props, obs_data_t *settings, int i)
 {
 	char key[64];
 	snprintf(key, sizeof(key), "item_%d_enabled", i + 1);
 	bool en = obs_data_get_bool(settings, key);
-	const char *names[] = {"kind",    "shape",        "outline_only",    "polygon_sides", "stroke_thickness",
-			       "color",   "image_path",   "source_name",     "size",          "rotation",
-			       "density", "twinkle_mode", "speed_drift_mode"};
+	const char *names[] = {"kind",        "shape",      "outline_only", "polygon_sides", "stroke_thickness",
+			       "color",       "image_path", "source_name",  "size",          "rotation",
+			       "offset_x",    "offset_y",   "density",      "twinkle_mode",  "speed_drift_mode",
+			       "autorot_mode"};
 	for (size_t k = 0; k < sizeof(names) / sizeof(names[0]); ++k) {
 		snprintf(key, sizeof(key), "item_%d_%s", i + 1, names[k]);
 		obs_property_t *pp = obs_properties_get(props, key);
@@ -314,6 +350,7 @@ static void apply_item_enabled_visibility(obs_properties_t *props, obs_data_t *s
 		apply_item_kind_visibility(props, settings, i);
 	apply_item_twinkle_visibility(props, settings, i);
 	apply_item_speed_drift_visibility(props, settings, i);
+	apply_item_autorot_visibility(props, settings, i);
 }
 
 static void apply_item_count_visibility(obs_properties_t *props, obs_data_t *settings)
@@ -438,6 +475,24 @@ static bool twinkle_modified(obs_properties_t *props, obs_property_t *p, obs_dat
 	return true;
 }
 
+static bool autorot_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(p);
+	bool en = obs_data_get_bool(settings, "autorot_enabled");
+	bool unison = (int)obs_data_get_int(settings, "autorot_style") == CAROT_STYLE_UNISON;
+	obs_property_t *pp;
+	pp = obs_properties_get(props, "autorot_style");
+	if (pp)
+		obs_property_set_visible(pp, en);
+	pp = obs_properties_get(props, "autorot_speed");
+	if (pp)
+		obs_property_set_visible(pp, en && unison);
+	pp = obs_properties_get(props, "autorot_seed");
+	if (pp)
+		obs_property_set_visible(pp, en);
+	return true;
+}
+
 static bool motion_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
 	UNUSED_PARAMETER(p);
@@ -476,6 +531,15 @@ static bool item_speed_drift_modified(obs_properties_t *props, obs_property_t *p
 	if (i < 0)
 		return false;
 	apply_item_speed_drift_visibility(props, settings, i);
+	return true;
+}
+
+static bool item_autorot_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	int i = item_index_from_prop(p);
+	if (i < 0)
+		return false;
+	apply_item_autorot_visibility(props, settings, i);
 	return true;
 }
 
@@ -548,6 +612,10 @@ static void add_item_group(obs_properties_t *root, struct cpat_renderer *r, int 
 	obs_properties_add_float_slider(grp, key, obs_module_text("Constellations.Item.Size"), 1.0, 1024.0, 1.0);
 	snprintf(key, sizeof(key), "item_%d_rotation", i + 1);
 	obs_properties_add_float_slider(grp, key, obs_module_text("Constellations.Item.Rotation"), 0.0, 360.0, 1.0);
+	snprintf(key, sizeof(key), "item_%d_offset_x", i + 1);
+	obs_properties_add_float_slider(grp, key, obs_module_text("Constellations.Item.OffsetX"), -1000.0, 1000.0, 1.0);
+	snprintf(key, sizeof(key), "item_%d_offset_y", i + 1);
+	obs_properties_add_float_slider(grp, key, obs_module_text("Constellations.Item.OffsetY"), -1000.0, 1000.0, 1.0);
 	snprintf(key, sizeof(key), "item_%d_density", i + 1);
 	obs_properties_add_float_slider(grp, key, obs_module_text("Constellations.Item.Density"), 0.1, 20.0, 0.1);
 
@@ -573,6 +641,25 @@ static void add_item_group(obs_properties_t *root, struct cpat_renderer *r, int 
 	snprintf(key, sizeof(key), "item_%d_speed_drift_amount", i + 1);
 	obs_properties_add_float_slider(grp, key, obs_module_text("Constellations.Item.SpeedDriftAmount"), 0.0, 1.0,
 					0.01);
+
+	snprintf(key, sizeof(key), "item_%d_autorot_mode", i + 1);
+	obs_property_t *arm = obs_properties_add_list(grp, key, obs_module_text("Constellations.Item.AutoRot"),
+						      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(arm, obs_module_text("Constellations.Item.AutoRot.Global"), CAROT_GLOBAL);
+	obs_property_list_add_int(arm, obs_module_text("Constellations.Item.AutoRot.Custom"), CAROT_CUSTOM);
+	obs_property_list_add_int(arm, obs_module_text("Constellations.Item.AutoRot.Off"), CAROT_OFF);
+	obs_property_set_modified_callback(arm, item_autorot_modified);
+	snprintf(key, sizeof(key), "item_%d_autorot_style", i + 1);
+	obs_property_t *ars = obs_properties_add_list(grp, key, obs_module_text("Constellations.Item.AutoRotStyle"),
+						      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(ars, obs_module_text("Constellations.AutoRot.Style.Random"), CAROT_STYLE_RANDOM);
+	obs_property_list_add_int(ars, obs_module_text("Constellations.AutoRot.Style.Unison"), CAROT_STYLE_UNISON);
+	obs_property_set_modified_callback(ars, item_autorot_modified);
+	snprintf(key, sizeof(key), "item_%d_autorot_speed", i + 1);
+	obs_properties_add_float_slider(grp, key, obs_module_text("Constellations.Item.AutoRotSpeed"), -360.0, 360.0,
+					1.0);
+	snprintf(key, sizeof(key), "item_%d_autorot_seed", i + 1);
+	obs_properties_add_int_slider(grp, key, obs_module_text("Constellations.Item.AutoRotSeed"), 0, 1000, 1);
 
 	char gid[64];
 	snprintf(gid, sizeof(gid), "item_%d_group", i + 1);
@@ -658,6 +745,22 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 	obs_properties_add_group(props, "twinkle_group", obs_module_text("Constellations.Group.Twinkle"),
 				 OBS_GROUP_NORMAL, tw);
 
+	obs_properties_t *ar = obs_properties_create();
+	obs_property_t *are =
+		obs_properties_add_bool(ar, "autorot_enabled", obs_module_text("Constellations.AutoRot.Enabled"));
+	obs_property_set_modified_callback(are, autorot_modified);
+	obs_property_t *arst = obs_properties_add_list(ar, "autorot_style",
+						       obs_module_text("Constellations.AutoRot.Style"),
+						       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(arst, obs_module_text("Constellations.AutoRot.Style.Random"), CAROT_STYLE_RANDOM);
+	obs_property_list_add_int(arst, obs_module_text("Constellations.AutoRot.Style.Unison"), CAROT_STYLE_UNISON);
+	obs_property_set_modified_callback(arst, autorot_modified);
+	obs_properties_add_float_slider(ar, "autorot_speed", obs_module_text("Constellations.AutoRot.Speed"), -360.0,
+					360.0, 1.0);
+	obs_properties_add_int_slider(ar, "autorot_seed", obs_module_text("Constellations.AutoRot.Seed"), 0, 1000, 1);
+	obs_properties_add_group(props, "autorot_group", obs_module_text("Constellations.Group.AutoRotation"),
+				 OBS_GROUP_NORMAL, ar);
+
 	obs_properties_t *vg = obs_properties_create();
 	obs_property_t *ve =
 		obs_properties_add_bool(vg, "vignette_enabled", obs_module_text("Constellations.Vignette.Enabled"));
@@ -732,6 +835,8 @@ static void cpat_item_update(struct cpat_item *it, obs_data_t *settings, int ind
 	if (it->size < 1.0f)
 		it->size = 1.0f;
 	it->rotation_deg = (float)obs_data_get_double(settings, IK("rotation"));
+	it->offset_x = (float)obs_data_get_double(settings, IK("offset_x"));
+	it->offset_y = (float)obs_data_get_double(settings, IK("offset_y"));
 	it->density = (float)obs_data_get_double(settings, IK("density"));
 	if (it->density <= 0.0f)
 		it->density = 0.1f;
@@ -740,6 +845,10 @@ static void cpat_item_update(struct cpat_item *it, obs_data_t *settings, int ind
 	it->twinkle_speed = (float)obs_data_get_double(settings, IK("twinkle_speed"));
 	it->speed_drift_mode = (int)obs_data_get_int(settings, IK("speed_drift_mode"));
 	it->speed_drift_amount = (float)obs_data_get_double(settings, IK("speed_drift_amount"));
+	it->autorot_mode = (int)obs_data_get_int(settings, IK("autorot_mode"));
+	it->autorot_speed = (float)obs_data_get_double(settings, IK("autorot_speed"));
+	it->autorot_style = (int)obs_data_get_int(settings, IK("autorot_style"));
+	it->autorot_seed = (float)obs_data_get_int(settings, IK("autorot_seed"));
 #undef IK
 }
 
@@ -784,6 +893,11 @@ void cpat_renderer_update(struct cpat_renderer *r, obs_data_t *settings, bool in
 	r->twinkle_enabled = obs_data_get_bool(settings, "twinkle_enabled");
 	r->twinkle_amount = (float)obs_data_get_double(settings, "twinkle_amount");
 	r->twinkle_speed = (float)obs_data_get_double(settings, "twinkle_speed");
+
+	r->autorot_enabled = obs_data_get_bool(settings, "autorot_enabled");
+	r->autorot_speed = (float)obs_data_get_double(settings, "autorot_speed");
+	r->autorot_style = (int)obs_data_get_int(settings, "autorot_style");
+	r->autorot_seed = (float)obs_data_get_int(settings, "autorot_seed");
 
 	r->vignette_enabled = obs_data_get_bool(settings, "vignette_enabled");
 	r->vignette_size = (float)obs_data_get_double(settings, "vignette_size");
@@ -913,6 +1027,10 @@ static void set_common_uniforms(struct cpat_renderer *r, struct cpat_item *it, u
 	p = gs_effect_get_param_by_name(r->effect, "shape_rotation");
 	if (p)
 		gs_effect_set_float(p, rot);
+	struct vec2 ioff = {it->offset_x, it->offset_y};
+	p = gs_effect_get_param_by_name(r->effect, "item_offset");
+	if (p)
+		gs_effect_set_vec2(p, &ioff);
 	p = gs_effect_get_param_by_name(r->effect, "shape_color");
 	if (p)
 		gs_effect_set_vec4(p, &it->color);
@@ -987,6 +1105,33 @@ static void set_common_uniforms(struct cpat_renderer *r, struct cpat_item *it, u
 	p = gs_effect_get_param_by_name(r->effect, "twinkle_speed");
 	if (p)
 		gs_effect_set_float(p, tw_speed);
+
+	/* Auto rotation always scatters random per-cell angles when active;
+	 * only the Unison style adds a shared continuous spin, so Random
+	 * passes a speed of zero and the shapes hold their random angles. */
+	bool ar_active = false;
+	float ar_speed = 0.0f;
+	float ar_seed = 0.0f;
+	if (it->autorot_mode == CAROT_CUSTOM) {
+		ar_active = true;
+		if (it->autorot_style == CAROT_STYLE_UNISON)
+			ar_speed = it->autorot_speed;
+		ar_seed = it->autorot_seed;
+	} else if (it->autorot_mode == CAROT_GLOBAL && r->autorot_enabled) {
+		ar_active = true;
+		if (r->autorot_style == CAROT_STYLE_UNISON)
+			ar_speed = r->autorot_speed;
+		ar_seed = r->autorot_seed;
+	}
+	p = gs_effect_get_param_by_name(r->effect, "auto_rot_active");
+	if (p)
+		gs_effect_set_float(p, ar_active ? 1.0f : 0.0f);
+	p = gs_effect_get_param_by_name(r->effect, "auto_rot_speed");
+	if (p)
+		gs_effect_set_float(p, ar_speed * (float)(M_PI / 180.0));
+	p = gs_effect_get_param_by_name(r->effect, "auto_rot_seed");
+	if (p)
+		gs_effect_set_float(p, ar_seed);
 
 	p = gs_effect_get_param_by_name(r->effect, "layout_mode");
 	if (p)

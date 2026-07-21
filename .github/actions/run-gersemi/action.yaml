@@ -50,7 +50,9 @@ runs:
         if (( ${+RUNNER_DEBUG} )) setopt XTRACE
 
         print ::group::Install gersemi
-        brew install --quiet obsproject/tools/gersemi
+        python3 -m pip install --quiet --user --break-system-packages gersemi \
+          || python3 -m pip install --quiet --user gersemi
+        path=(${HOME}/.local/bin ${path})
         print ::endgroup::
 
         print ::group::Run gersemi
