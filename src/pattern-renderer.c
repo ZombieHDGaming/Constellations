@@ -313,22 +313,22 @@ static void apply_item_autorot_visibility(obs_properties_t *props, obs_data_t *s
 	snprintf(key, sizeof(key), "item_%d_autorot_mode", i + 1);
 	bool custom = (int)obs_data_get_int(settings, key) == CAROT_CUSTOM;
 	snprintf(key, sizeof(key), "item_%d_autorot_style", i + 1);
-	bool random = (int)obs_data_get_int(settings, key) == CAROT_STYLE_RANDOM;
+	bool unison = (int)obs_data_get_int(settings, key) == CAROT_STYLE_UNISON;
 	snprintf(key, sizeof(key), "item_%d_enabled", i + 1);
 	bool en = obs_data_get_bool(settings, key);
 	obs_property_t *pp;
-	snprintf(key, sizeof(key), "item_%d_autorot_speed", i + 1);
-	pp = obs_properties_get(props, key);
-	if (pp)
-		obs_property_set_visible(pp, en && custom);
 	snprintf(key, sizeof(key), "item_%d_autorot_style", i + 1);
 	pp = obs_properties_get(props, key);
 	if (pp)
 		obs_property_set_visible(pp, en && custom);
+	snprintf(key, sizeof(key), "item_%d_autorot_speed", i + 1);
+	pp = obs_properties_get(props, key);
+	if (pp)
+		obs_property_set_visible(pp, en && custom && unison);
 	snprintf(key, sizeof(key), "item_%d_autorot_seed", i + 1);
 	pp = obs_properties_get(props, key);
 	if (pp)
-		obs_property_set_visible(pp, en && custom && random);
+		obs_property_set_visible(pp, en && custom);
 }
 
 static void apply_item_enabled_visibility(obs_properties_t *props, obs_data_t *settings, int i)
@@ -479,17 +479,17 @@ static bool autorot_modified(obs_properties_t *props, obs_property_t *p, obs_dat
 {
 	UNUSED_PARAMETER(p);
 	bool en = obs_data_get_bool(settings, "autorot_enabled");
-	bool random = (int)obs_data_get_int(settings, "autorot_style") == CAROT_STYLE_RANDOM;
+	bool unison = (int)obs_data_get_int(settings, "autorot_style") == CAROT_STYLE_UNISON;
 	obs_property_t *pp;
-	pp = obs_properties_get(props, "autorot_speed");
-	if (pp)
-		obs_property_set_visible(pp, en);
 	pp = obs_properties_get(props, "autorot_style");
 	if (pp)
 		obs_property_set_visible(pp, en);
+	pp = obs_properties_get(props, "autorot_speed");
+	if (pp)
+		obs_property_set_visible(pp, en && unison);
 	pp = obs_properties_get(props, "autorot_seed");
 	if (pp)
-		obs_property_set_visible(pp, en && random);
+		obs_property_set_visible(pp, en);
 	return true;
 }
 
@@ -649,15 +649,15 @@ static void add_item_group(obs_properties_t *root, struct cpat_renderer *r, int 
 	obs_property_list_add_int(arm, obs_module_text("Constellations.Item.AutoRot.Custom"), CAROT_CUSTOM);
 	obs_property_list_add_int(arm, obs_module_text("Constellations.Item.AutoRot.Off"), CAROT_OFF);
 	obs_property_set_modified_callback(arm, item_autorot_modified);
-	snprintf(key, sizeof(key), "item_%d_autorot_speed", i + 1);
-	obs_properties_add_float_slider(grp, key, obs_module_text("Constellations.Item.AutoRotSpeed"), -360.0, 360.0,
-					1.0);
 	snprintf(key, sizeof(key), "item_%d_autorot_style", i + 1);
 	obs_property_t *ars = obs_properties_add_list(grp, key, obs_module_text("Constellations.Item.AutoRotStyle"),
 						      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-	obs_property_list_add_int(ars, obs_module_text("Constellations.AutoRot.Style.Unison"), CAROT_STYLE_UNISON);
 	obs_property_list_add_int(ars, obs_module_text("Constellations.AutoRot.Style.Random"), CAROT_STYLE_RANDOM);
+	obs_property_list_add_int(ars, obs_module_text("Constellations.AutoRot.Style.Unison"), CAROT_STYLE_UNISON);
 	obs_property_set_modified_callback(ars, item_autorot_modified);
+	snprintf(key, sizeof(key), "item_%d_autorot_speed", i + 1);
+	obs_properties_add_float_slider(grp, key, obs_module_text("Constellations.Item.AutoRotSpeed"), -360.0, 360.0,
+					1.0);
 	snprintf(key, sizeof(key), "item_%d_autorot_seed", i + 1);
 	obs_properties_add_int_slider(grp, key, obs_module_text("Constellations.Item.AutoRotSeed"), 0, 1000, 1);
 
@@ -749,14 +749,14 @@ void cpat_renderer_get_properties(struct cpat_renderer *r, obs_properties_t *pro
 	obs_property_t *are =
 		obs_properties_add_bool(ar, "autorot_enabled", obs_module_text("Constellations.AutoRot.Enabled"));
 	obs_property_set_modified_callback(are, autorot_modified);
-	obs_properties_add_float_slider(ar, "autorot_speed", obs_module_text("Constellations.AutoRot.Speed"), -360.0,
-					360.0, 1.0);
 	obs_property_t *arst = obs_properties_add_list(ar, "autorot_style",
 						       obs_module_text("Constellations.AutoRot.Style"),
 						       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-	obs_property_list_add_int(arst, obs_module_text("Constellations.AutoRot.Style.Unison"), CAROT_STYLE_UNISON);
 	obs_property_list_add_int(arst, obs_module_text("Constellations.AutoRot.Style.Random"), CAROT_STYLE_RANDOM);
+	obs_property_list_add_int(arst, obs_module_text("Constellations.AutoRot.Style.Unison"), CAROT_STYLE_UNISON);
 	obs_property_set_modified_callback(arst, autorot_modified);
+	obs_properties_add_float_slider(ar, "autorot_speed", obs_module_text("Constellations.AutoRot.Speed"), -360.0,
+					360.0, 1.0);
 	obs_properties_add_int_slider(ar, "autorot_seed", obs_module_text("Constellations.AutoRot.Seed"), 0, 1000, 1);
 	obs_properties_add_group(props, "autorot_group", obs_module_text("Constellations.Group.AutoRotation"),
 				 OBS_GROUP_NORMAL, ar);
@@ -1106,27 +1106,29 @@ static void set_common_uniforms(struct cpat_renderer *r, struct cpat_item *it, u
 	if (p)
 		gs_effect_set_float(p, tw_speed);
 
-	/* When inactive both speed and the random flag go to zero, which the
-	 * shader treats as "no extra rotation". Random keeps a non-zero flag
-	 * even at zero speed so the seed still scatters static angles. */
+	/* Auto rotation always scatters random per-cell angles when active;
+	 * only the Unison style adds a shared continuous spin, so Random
+	 * passes a speed of zero and the shapes hold their random angles. */
+	bool ar_active = false;
 	float ar_speed = 0.0f;
-	bool ar_random = false;
 	float ar_seed = 0.0f;
 	if (it->autorot_mode == CAROT_CUSTOM) {
-		ar_speed = it->autorot_speed;
-		ar_random = it->autorot_style == CAROT_STYLE_RANDOM;
+		ar_active = true;
+		if (it->autorot_style == CAROT_STYLE_UNISON)
+			ar_speed = it->autorot_speed;
 		ar_seed = it->autorot_seed;
 	} else if (it->autorot_mode == CAROT_GLOBAL && r->autorot_enabled) {
-		ar_speed = r->autorot_speed;
-		ar_random = r->autorot_style == CAROT_STYLE_RANDOM;
+		ar_active = true;
+		if (r->autorot_style == CAROT_STYLE_UNISON)
+			ar_speed = r->autorot_speed;
 		ar_seed = r->autorot_seed;
 	}
+	p = gs_effect_get_param_by_name(r->effect, "auto_rot_active");
+	if (p)
+		gs_effect_set_float(p, ar_active ? 1.0f : 0.0f);
 	p = gs_effect_get_param_by_name(r->effect, "auto_rot_speed");
 	if (p)
 		gs_effect_set_float(p, ar_speed * (float)(M_PI / 180.0));
-	p = gs_effect_get_param_by_name(r->effect, "auto_rot_random");
-	if (p)
-		gs_effect_set_float(p, ar_random ? 1.0f : 0.0f);
 	p = gs_effect_get_param_by_name(r->effect, "auto_rot_seed");
 	if (p)
 		gs_effect_set_float(p, ar_seed);

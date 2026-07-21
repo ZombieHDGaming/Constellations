@@ -27,9 +27,9 @@ uniform float elapsed_time;  // seconds since the source was created
 uniform float twinkle_amount; // fraction of cells that twinkle (0 disables)
 uniform float twinkle_speed;  // twinkle cycles per second
 
-uniform float auto_rot_speed;  // continuous spin in radians per second
-uniform float auto_rot_random; // 1 = per-cell random start angle and rate
-uniform float auto_rot_seed;   // reshuffles the random angles/rates
+uniform float auto_rot_active; // 1 = apply per-cell random rotation angles
+uniform float auto_rot_speed;  // unison spin in radians per second (0 = static)
+uniform float auto_rot_seed;   // reshuffles the random angles
 
 uniform float layout_mode;   // 0 layered, 1 step-repeat, 2 grid
 uniform float grid_random;   // grid mode: 1 = random cell assignment, 0 = ordered
@@ -305,21 +305,16 @@ float twinkle_alpha_calc(float2 cell_id)
 	return sin(elapsed_time * twinkle_speed * 6.2831853 * rate + ph) * 0.5 + 0.5;
 }
 
-// Per-cell spin for the Auto Rotation effect, added on top of the item's
-// static rotation. Unison spins every cell from the same angle at the same
-// rate. Random gives each cell its own starting angle (reshuffled by the
-// seed) and a rate between 0.5x and 1.5x the configured speed so the shapes
-// decohere over time instead of staying phase-locked.
+// Per-cell rotation for the Auto Rotation effect, added on top of the item's
+// static rotation. Every cell always gets its own random angle (reshuffled by
+// the seed); Unison style additionally spins all cells together at the shared
+// speed, while Random style leaves them static (speed arrives as 0).
 float auto_rot_angle(float2 cell_id)
 {
-	float ang = elapsed_time * auto_rot_speed;
-	if (auto_rot_random > 0.5) {
-		float s = auto_rot_seed + item_seed;
-		float ph = hash11(cell_id + 41.3, s + 6.29) * 6.2831853;
-		float rate = 0.5 + hash11(cell_id + 57.1, s + 13.37);
-		ang = ang * rate + ph;
-	}
-	return ang;
+	if (auto_rot_active < 0.5)
+		return 0.0;
+	float ph = hash11(cell_id + 41.3, auto_rot_seed + item_seed + 6.29) * 6.2831853;
+	return ph + elapsed_time * auto_rot_speed;
 }
 
 float shape_sdf(float2 p)
