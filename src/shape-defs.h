@@ -88,6 +88,17 @@ enum constellations_item_speed_drift_mode {
 	CSDRIFT_OFF = 2,
 };
 
+enum constellations_item_autorot_mode {
+	CAROT_GLOBAL = 0,
+	CAROT_CUSTOM = 1,
+	CAROT_OFF = 2,
+};
+
+enum constellations_autorot_style {
+	CAROT_STYLE_UNISON = 0,
+	CAROT_STYLE_RANDOM = 1,
+};
+
 enum constellations_tiling_mode {
 	CTILE_GRID = 0,
 	CTILE_TIGHT = 1,

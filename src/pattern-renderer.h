@@ -34,6 +34,8 @@ struct cpat_item {
 
 	float size;
 	float rotation_deg;
+	float offset_x;
+	float offset_y;
 	float density;
 
 	int twinkle_mode;
@@ -42,6 +44,11 @@ struct cpat_item {
 
 	int speed_drift_mode;
 	float speed_drift_amount;
+
+	int autorot_mode;
+	float autorot_speed;
+	int autorot_style;
+	float autorot_seed;
 };
 
 struct cpat_renderer {
@@ -71,6 +78,11 @@ struct cpat_renderer {
 	bool twinkle_enabled;
 	float twinkle_amount;
 	float twinkle_speed;
+
+	bool autorot_enabled;
+	float autorot_speed;
+	int autorot_style;
+	float autorot_seed;
 
 	bool vignette_enabled;
 	float vignette_size;

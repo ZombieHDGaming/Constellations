@@ -16,6 +16,7 @@ uniform float outline_only;
 
 uniform float2 lattice_dir;    // canvas rotation axes (cos, sin)
 uniform float2 motion_offset;  // accumulated motion in lattice coords (along, perp) px
+uniform float2 item_offset;    // per-item pattern shift in screen px
 uniform float alt_lines;
 uniform float drift_speed_amt;
 uniform float drift_speed_seed; // shared across items unless per-item drift
@@ -25,6 +26,10 @@ uniform float elapsed_time;  // seconds since the source was created
 
 uniform float twinkle_amount; // fraction of cells that twinkle (0 disables)
 uniform float twinkle_speed;  // twinkle cycles per second
+
+uniform float auto_rot_speed;  // continuous spin in radians per second
+uniform float auto_rot_random; // 1 = per-cell random start angle and rate
+uniform float auto_rot_seed;   // reshuffles the random angles/rates
 
 uniform float layout_mode;   // 0 layered, 1 step-repeat, 2 grid
 uniform float grid_random;   // grid mode: 1 = random cell assignment, 0 = ordered
@@ -197,7 +202,7 @@ float vignette_mask_calc(float2 px)
 float2 cell_local_at(float2 frag_px, int dcol, int drow, out float2 cell_id)
 {
 	float cs = max(cell_size, 1.0);
-	float2 pos = frag_px - anchor;
+	float2 pos = frag_px - anchor - item_offset;
 	float2 axis = lattice_dir;
 	float2 perp = float2(-axis.y, axis.x);
 
@@ -300,6 +305,23 @@ float twinkle_alpha_calc(float2 cell_id)
 	return sin(elapsed_time * twinkle_speed * 6.2831853 * rate + ph) * 0.5 + 0.5;
 }
 
+// Per-cell spin for the Auto Rotation effect, added on top of the item's
+// static rotation. Unison spins every cell from the same angle at the same
+// rate. Random gives each cell its own starting angle (reshuffled by the
+// seed) and a rate between 0.5x and 1.5x the configured speed so the shapes
+// decohere over time instead of staying phase-locked.
+float auto_rot_angle(float2 cell_id)
+{
+	float ang = elapsed_time * auto_rot_speed;
+	if (auto_rot_random > 0.5) {
+		float s = auto_rot_seed + item_seed;
+		float ph = hash11(cell_id + 41.3, s + 6.29) * 6.2831853;
+		float rate = 0.5 + hash11(cell_id + 57.1, s + 13.37);
+		ang = ang * rate + ph;
+	}
+	return ang;
+}
+
 float shape_sdf(float2 p)
 {
 	float r = shape_size * 0.5;
@@ -332,7 +354,7 @@ float4 PSShape(VertData v_in) : TARGET
 				float2 p = cell_local_at(frag_px, dc, dr, cid);
 				if (!cell_belongs_to_this_item(cid))
 					continue;
-				p = rotate2(p, shape_rotation);
+				p = rotate2(p, shape_rotation + auto_rot_angle(cid));
 				float d = shape_sdf(p);
 				if (outline_only > 0.5)
 					d = abs(d) - stroke_w * 0.5;
@@ -348,7 +370,7 @@ float4 PSShape(VertData v_in) : TARGET
 				float2 p = cell_local_at(frag_px, dc, dr, cid);
 				if (!cell_belongs_to_this_item(cid))
 					continue;
-				p = rotate2(p, shape_rotation);
+				p = rotate2(p, shape_rotation + auto_rot_angle(cid));
 				float d = shape_sdf(p);
 				best_d = min(best_d, d);
 			}
@@ -388,7 +410,7 @@ float4 PSImage(VertData v_in) : TARGET
 			float2 p = cell_local_at(frag_px, dc, dr, cid);
 			if (!cell_belongs_to_this_item(cid))
 				continue;
-			p = rotate2(p, shape_rotation);
+			p = rotate2(p, shape_rotation + auto_rot_angle(cid));
 			if (abs(p.x) <= half_size && abs(p.y) <= half_size) {
 				float d2 = dot(p, p);
 				if (d2 < best_dist2) {
