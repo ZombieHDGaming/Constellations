@@ -51,9 +51,9 @@ runs:
         if (( ${+RUNNER_DEBUG} )) setopt XTRACE
 
         print ::group::Install clang-format-19
-        brew tap --quiet obsproject/tools
-        brew trust obsproject/tools || true
-        brew install --quiet obsproject/tools/clang-format@19
+        python3 -m pip install --quiet --user --break-system-packages clang-format==19.1.1 \
+          || python3 -m pip install --quiet --user clang-format==19.1.1
+        path=(${HOME}/.local/bin ${path})
         print ::endgroup::
 
         print ::group::Run clang-format-19
